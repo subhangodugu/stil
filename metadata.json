@@ -1,0 +1,6 @@
+{
+  "name": "STIL Analyzer Pro",
+  "description": "Professional semiconductor scan diagnostic tool with STIL parsing, failure correlation, and heatmap visualization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

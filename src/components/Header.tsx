@@ -1,0 +1,214 @@
+import React, { useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Upload, Database, FileText, Trash2, RefreshCcw } from 'lucide-react';
+import { useStore } from '../store/useStore';
+import { motion } from 'framer-motion';
+import { cn } from '../lib/utils';
+
+export const Header: React.FC = () => {
+  const { 
+    projectData, setProjectData, setFailingFFs, setLoading, setError, 
+    setStilText, reset, loading, setViewMode, viewMode, setDashboardChips
+  } = useStore();
+  const navigate = useNavigate();
+  const stilInputRef = useRef<HTMLInputElement>(null);
+  const logInputRef = useRef<HTMLInputElement>(null);
+  const bulkInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAnalyze = async () => {
+    const stilFile = stilInputRef.current?.files?.[0];
+    const logFile = logInputRef.current?.files?.[0];
+
+    if (!stilFile) {
+      setError("Please select at least a STIL file.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append('stil', stilFile);
+    if (logFile) formData.append('failLog', logFile);
+
+    try {
+      const resp = await fetch('/api/analyze', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!resp.ok) {
+        const errorData = await resp.json().catch(() => ({}));
+        throw new Error(errorData.error || "Analysis failed");
+      }
+
+      const data = await resp.json();
+      setProjectData(data.projectData);
+      setFailingFFs(data.failingFFs);
+
+      // Refresh dashboard data for unified connectivity
+      const summaryResp = await fetch('/api/tester-summary');
+      if (summaryResp.ok) {
+        const summaryData = await summaryResp.json();
+        setDashboardChips(summaryData);
+      }
+
+      navigate('/');
+      setViewMode('topology');
+    } catch (err) {
+      setError("Failed to analyze files.");
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBulkImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setLoading(true);
+    setError(null);
+
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) {
+      formData.append('files', files[i]);
+    }
+
+    try {
+      const response = await fetch('/api/bulk-analyze', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Bulk analysis failed');
+
+      const data = await response.json();
+      
+      // Refresh dashboard data
+      const summaryResp = await fetch('/api/tester-summary');
+      if (summaryResp.ok) {
+        const summaryData = await summaryResp.json();
+        setDashboardChips(summaryData);
+      }
+
+      navigate('/');
+      setViewMode('dashboard');
+    } catch (err) {
+      setError("Bulk import failed. Ensure database is running.");
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <motion.header 
+      initial={{ opacity: 0, y: -20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+      className="flex justify-between items-center mb-10 border-b border-slate-800/50 pb-6 relative"
+    >
+      <div className="absolute inset-x-0 -bottom-px h-px bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent" />
+      <div className="flex items-center gap-4">
+        <div 
+          className="w-12 h-12 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(6,182,212,0.3)] cursor-pointer"
+          onClick={() => setViewMode('dashboard')}
+        >
+          <Database className="text-white" size={24} />
+        </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 
+              className="text-2xl font-black bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-500 bg-clip-text text-transparent tracking-tight cursor-pointer"
+              onClick={() => setViewMode('dashboard')}
+            >
+              STIL Analyzer Pro
+            </h1>
+            <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-black tracking-widest uppercase">Tester V1</span>
+          </div>
+          <p className="text-slate-500 text-xs font-medium uppercase tracking-[0.2em] flex items-center gap-2">
+            Enterprise Scan Diagnostics
+            <span className="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full ml-1">
+              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
+              <span className="text-[7px] font-black text-emerald-500 uppercase tracking-widest">System Live</span>
+            </span>
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        {/* Navigation Toggle - Hardened for fleet-only view */}
+        <div className="flex bg-slate-900/50 border border-slate-800 rounded-lg p-1 mr-4">
+          <button 
+            onClick={() => { navigate('/'); setViewMode('dashboard'); }}
+            className="px-6 py-1.5 rounded-md text-[10px] font-black uppercase text-cyan-400 bg-slate-800 shadow-sm transition-all"
+          >
+            Tester Dashboard
+          </button>
+        </div>
+
+        <div className="flex items-center bg-slate-900/50 border border-slate-800 rounded-lg p-0.5">
+          <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded-md cursor-pointer transition-all group">
+            <FileText size={14} className="text-slate-500 group-hover:text-cyan-400" />
+            <span className="text-[10px] font-black uppercase text-slate-500 group-hover:text-slate-300">STIL</span>
+            <input type="file" ref={stilInputRef} className="hidden" accept=".stil,.stf" />
+          </label>
+          <div className="w-px h-4 bg-slate-800 mx-0.5"></div>
+          <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded-md cursor-pointer transition-all group">
+            <Database size={14} className="text-slate-500 group-hover:text-cyan-400" />
+            <span className="text-[10px] font-black uppercase text-slate-500 group-hover:text-slate-300">Fail Log</span>
+            <input type="file" ref={logInputRef} className="hidden" accept=".log,.txt,.csv" />
+          </label>
+        </div>
+
+        <button 
+          onClick={handleAnalyze}
+          disabled={loading}
+          className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white px-5 py-2 rounded-xl font-black text-xs transition-all duration-300 hover:scale-[1.02] active:scale-95 shadow-[0_0_20px_rgba(6,182,212,0.4)] disabled:opacity-50 disabled:hover:scale-100"
+        >
+          {loading ? (
+            <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}>
+              <RefreshCcw size={14} />
+            </motion.div>
+          ) : (
+            <svg 
+              width="14" 
+              height="14" 
+              viewBox="0 0 24 24" 
+              fill="currentColor" 
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path d="M5 3l14 9-14 9V3z" />
+            </svg>
+          )}
+          Execute Pipeline
+        </button>
+
+        <div className="w-px h-8 bg-slate-800 mx-2"></div>
+
+        <label className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-200 px-5 py-2 rounded-xl font-bold text-xs transition-all duration-300 hover:scale-[1.02] active:scale-95 cursor-pointer">
+          <Database size={14} className="text-cyan-400" />
+          {loading ? 'Processing...' : 'Bulk Import'}
+          <input 
+            type="file" 
+            ref={bulkInputRef} 
+            multiple 
+            onChange={handleBulkImport} 
+            className="hidden" 
+            accept=".stil,.stf"
+          />
+        </label>
+
+        <button 
+          onClick={reset}
+          className="flex items-center gap-2 px-3 py-2 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all text-xs font-bold"
+          title="Clear All Data"
+        >
+          <Trash2 size={16} />
+        </button>
+      </div>
+    </motion.header>
+
+  );
+};

@@ -1,4 +1,4 @@
-import { STILUnified } from "./parser";
+import { STILUnified } from "./stilParser.js";
 
 export interface FailEntry {
   pattern: number;

@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
-import { GoogleGenAI } from "@google/genai";
-import { Sparkles, Loader2, AlertCircle } from 'lucide-react';
+import { Sparkles, Loader2, AlertCircle, Clock, Database } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { cn } from '../lib/utils';
 
 export const AIInsightPanel: React.FC = () => {
   const { projectData, failingFFs, selectedChain } = useStore();
   const [insight, setInsight] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [metadata, setMetadata] = useState<{ source: string; generatedAt: string | null }>({ source: '', generatedAt: null });
 
   useEffect(() => {
     if (!projectData) return;
@@ -24,42 +25,40 @@ export const AIInsightPanel: React.FC = () => {
     
     setLoading(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
-      
       const failingCount = Object.keys(failingFFs).length;
       const totalFails = Object.values(failingFFs).reduce((a, b) => a + b, 0);
       
-      const prompt = `
-        You are an expert Semiconductor Diagnostic Engineer. 
-        Analyze the following scan diagnostic data and provide a professional insight.
-        
-        DATA:
-        - Total Scan Chains: ${projectData.scanChains.length}
-        - Total Flip-Flops: ${projectData.totalFFs}
-        - Compression (EDT): ${projectData.hasEDT ? 'Enabled' : 'Disabled'}
-        - Failing Flip-Flops: ${failingCount}
-        - Total Failure Events: ${totalFails}
-        - Targeted Chain: ${selectedChain?.name || 'Global'}
-        - Failing FF IDs: ${Object.keys(failingFFs).slice(0, 20).join(', ')}${failingCount > 20 ? '...' : ''}
-        
-        TASK:
-        1. Identify the most probable root cause (Stuck-at-0, Stuck-at-1, Chain Break, or Intermittent).
-        2. Suggest physical failure sources (e.g., metal short, via open).
-        3. Provide a confidence score (0-100%).
-        4. Give a repair/debug recommendation.
-        
-        Format the output as a clean, structured report with professional EDA terminology.
-      `;
+      const diagnosticData = {
+        chipId: projectData.scanChains?.[0]?.name || "UNKNOWN_UNIT", // Simplified ID for insight correlation
+        totalChains: projectData.scanChains.length,
+        totalFFs: projectData.totalFFs,
+        hasEDT: projectData.hasEDT,
+        failingCount,
+        totalFails,
+        selectedChain: selectedChain?.name || 'Global',
+        failingFFs: Object.keys(failingFFs).slice(0, 50)
+      };
 
-      const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
-        contents: prompt,
+      const response = await fetch("/api/ai/insight", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          chipId: diagnosticData.chipId,
+          data: diagnosticData
+        }),
       });
 
-      setInsight(response.text || "Unable to generate insight.");
+      if (!response.ok) throw new Error("AI Engine unreachable");
+
+      const result = await response.json();
+      setInsight(result.insight || "Unable to generate insight.");
+      setMetadata({ 
+        source: result.source, 
+        generatedAt: result.generatedAt ? new Date(result.generatedAt).toLocaleString() : null 
+      });
     } catch (error) {
       console.error("AI Insight Error:", error);
-      setInsight("Error generating AI insights. Please check your API configuration.");
+      setInsight("Error generating AI insights. The diagnostic engine may be offline.");
     } finally {
       setLoading(false);
     }
@@ -100,10 +99,29 @@ export const AIInsightPanel: React.FC = () => {
               key="content"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="prose prose-invert prose-sm max-w-none"
+              className="space-y-6"
             >
-              <div className="whitespace-pre-wrap text-slate-300 leading-relaxed">
-                {insight}
+              <div className="prose prose-invert prose-sm max-w-none">
+                <div className="whitespace-pre-wrap text-slate-300 leading-relaxed">
+                  {insight}
+                </div>
+              </div>
+
+              {/* Metadata Footer */}
+              <div className="pt-4 border-t border-slate-800/50 flex items-center justify-between text-[10px] uppercase tracking-widest font-bold">
+                <div className={cn(
+                  "flex items-center gap-1.5 px-2 py-0.5 rounded-full border",
+                  metadata.source === 'cache' ? "bg-cyan-500/10 border-cyan-500/20 text-cyan-400" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                )}>
+                  {metadata.source === 'cache' ? <Database size={10} /> : <Sparkles size={10} />}
+                  {metadata.source === 'cache' ? 'Cached Diagnostic' : 'Fresh Analysis'}
+                </div>
+                {metadata.generatedAt && (
+                  <div className="flex items-center gap-1.5 text-slate-500">
+                    <Clock size={10} />
+                    {metadata.generatedAt}
+                  </div>
+                )}
               </div>
             </motion.div>
           ) : (

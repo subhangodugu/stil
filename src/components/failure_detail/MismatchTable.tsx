@@ -28,6 +28,7 @@ export default function MismatchTable({ details }: Props) {
               <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">FF Pos</th>
               <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Expected</th>
               <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Actual</th>
+              <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Fault Type</th>
               <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Status</th>
             </tr>
           </thead>
@@ -50,7 +51,17 @@ export default function MismatchTable({ details }: Props) {
                   <span className="text-xs font-black text-red-500">{row.actual_value}</span>
                 </td>
                 <td className="px-6 py-3">
-                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20 uppercase tracking-widest">
+                  <span className={cn(
+                    "text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest border",
+                    row.fault_type === 'STUCK_AT_0' ? "bg-red-500/10 text-red-400 border-red-500/20" :
+                    row.fault_type === 'STUCK_AT_1' ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
+                    "bg-slate-800 text-slate-400 border-slate-700"
+                  )}>
+                    {row.fault_type || 'UNKNOWN'}
+                  </span>
+                </td>
+                <td className="px-6 py-3">
+                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20 uppercase tracking-widest">
                     MISMATCH
                   </span>
                 </td>

@@ -1,6 +1,6 @@
-import { FaultSummary } from "./faultSummaryBuilder";
-import { FailEntry } from "./activationEngine";
-import { STILUnified } from "./parser";
+import { FaultSummary } from "./faultSummaryBuilder.js";
+import { FailEntry } from "./activationEngine.js";
+import { STILUnified } from "./stilParser.js";
 
 export function generateFailLogText(
   summary: FaultSummary,

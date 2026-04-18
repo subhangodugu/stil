@@ -4,11 +4,12 @@ import { Upload, Database, FileText, Trash2, RefreshCcw } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { motion } from 'framer-motion';
 import { cn } from '../lib/utils';
+import toast from 'react-hot-toast';
 
 export const Header: React.FC = () => {
   const { 
-    projectData, setProjectData, setFailingFFs, setLoading, setError, 
-    setStilText, reset, loading, setViewMode, viewMode, setDashboardChips
+    setProjectData, setFailingFFs, setLoading, 
+    reset, loading, setViewMode, setDashboardChips
   } = useStore();
   const navigate = useNavigate();
   const stilInputRef = useRef<HTMLInputElement>(null);
@@ -20,19 +21,19 @@ export const Header: React.FC = () => {
     const logFile = logInputRef.current?.files?.[0];
 
     if (!stilFile) {
-      setError("Please select at least a STIL file.");
+      toast.error("Industrial Error: STIL file required for architecture mapping");
       return;
     }
 
+    const toastId = toast.loading("Executing Diagnostic Pipeline...");
     setLoading(true);
-    setError(null);
 
     const formData = new FormData();
     formData.append('stil', stilFile);
     if (logFile) formData.append('failLog', logFile);
 
     try {
-      const resp = await fetch('/api/analyze', {
+      const resp = await fetch('/api/uploads/analyze', {
         method: 'POST',
         body: formData,
       });
@@ -47,16 +48,17 @@ export const Header: React.FC = () => {
       setFailingFFs(data.failingFFs);
 
       // Refresh dashboard data for unified connectivity
-      const summaryResp = await fetch('/api/tester-summary');
+      const summaryResp = await fetch('/api/data/summary');
       if (summaryResp.ok) {
         const summaryData = await summaryResp.json();
         setDashboardChips(summaryData);
       }
 
+      toast.success("Pipeline Executed: Deterministic Faults Mapped", { id: toastId });
       navigate('/');
       setViewMode('topology');
-    } catch (err) {
-      setError("Failed to analyze files.");
+    } catch (err: any) {
+      toast.error(`System Failure: ${err.message}`, { id: toastId });
       console.error(err);
     } finally {
       setLoading(false);
@@ -67,8 +69,8 @@ export const Header: React.FC = () => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
+    const toastId = toast.loading(`Importing ${files.length} diagnostic records...`);
     setLoading(true);
-    setError(null);
 
     const formData = new FormData();
     for (let i = 0; i < files.length; i++) {
@@ -76,26 +78,47 @@ export const Header: React.FC = () => {
     }
 
     try {
-      const response = await fetch('/api/bulk-analyze', {
+      const response = await fetch('/api/uploads/bulk-analyze', {
         method: 'POST',
         body: formData,
       });
 
-      if (!response.ok) throw new Error('Bulk analysis failed');
+      if (!response.ok) throw new Error('Industrial bulk ingestion failed');
 
-      const data = await response.json();
-      
       // Refresh dashboard data
-      const summaryResp = await fetch('/api/tester-summary');
+      const summaryResp = await fetch('/api/data/summary');
       if (summaryResp.ok) {
         const summaryData = await summaryResp.json();
         setDashboardChips(summaryData);
       }
 
+      toast.success(`Successfully ingested ${files.length} records`, { id: toastId });
       navigate('/');
       setViewMode('dashboard');
-    } catch (err) {
-      setError("Bulk import failed. Ensure database is running.");
+    } catch (err: any) {
+      toast.error(`Ingestion Error: ${err.message}`, { id: toastId });
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetAll = async () => {
+    if (!window.confirm("CRITICAL ACTION: This will permanently delete ALL diagnostic records and batch history. Are you sure?")) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const resp = await fetch('/api/data/reset-all', { method: 'DELETE' });
+      if (!resp.ok) throw new Error("Failed to clear server data");
+      
+      reset(); // Clear local state
+      toast.success("Industrial Core Reset: Database Purged");
+      navigate('/');
+      setViewMode('dashboard');
+    } catch (err: any) {
+      toast.error(`Reset Failed: ${err.message}`);
       console.error(err);
     } finally {
       setLoading(false);
@@ -201,8 +224,9 @@ export const Header: React.FC = () => {
         </label>
 
         <button 
-          onClick={reset}
-          className="flex items-center gap-2 px-3 py-2 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all text-xs font-bold"
+          onClick={handleResetAll}
+          disabled={loading}
+          className="flex items-center gap-2 px-3 py-2 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all text-xs font-bold disabled:opacity-50"
           title="Clear All Data"
         >
           <Trash2 size={16} />

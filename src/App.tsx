@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Toaster } from 'react-hot-toast';
 import { BrowserRouter, Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import { Header } from './components/Header';
 import { HardwareTopology } from './components/HardwareTopology';
@@ -34,6 +35,7 @@ interface StatCardProps {
 export default function App() {
   return (
     <BrowserRouter>
+      <Toaster position="top-right" reverseOrder={false} />
       <MainLayout />
     </BrowserRouter>
   );

@@ -17,7 +17,7 @@ export default function TesterDashboard() {
   const fetchSummary = async () => {
     setIsRefreshing(true);
     try {
-      const response = await fetch('/api/tester-summary');
+      const response = await fetch('/api/data/summary');
       if (!response.ok) throw new Error('Failed to fetch tester summary');
       const data = await response.json();
       setDashboardChips(data);

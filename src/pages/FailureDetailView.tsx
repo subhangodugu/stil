@@ -45,7 +45,7 @@ export default function FailureDetailView() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await fetch(`/api/chip/${chipId}/failure-details`);
+        const response = await fetch(`/api/data/batch/${chipId}/details`);
         if (!response.ok) throw new Error('Failed to fetch failure details');
         const result = await response.json();
         setData(result);

@@ -73,7 +73,7 @@ export const FaultInjectionPanel: React.FC = () => {
         clusterSize,
       }));
 
-      const response = await fetch('/api/inject-fault', {
+      const response = await fetch('/api/uploads/inject-fault', {
         method: 'POST',
         body: formData,
       });
@@ -91,7 +91,7 @@ export const FaultInjectionPanel: React.FC = () => {
       const logBlob = new Blob([result.logText], { type: 'text/plain' });
       analyzeFormData.append('failLog', logBlob, 'synthetic_fail.log');
 
-      const analyzeResponse = await fetch('/api/analyze', {
+      const analyzeResponse = await fetch('/api/uploads/analyze', {
         method: 'POST',
         body: analyzeFormData,
       });

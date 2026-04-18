@@ -1,8 +1,12 @@
-import { parseSTIL } from "./parser";
-import { runActivationEngine } from "./activationEngine";
-import { buildFaultSummary } from "./faultSummaryBuilder";
-import { generateFailLogText, generateFailLogJson } from "./failLogGenerator";
+import { parseSTIL } from "./stilParser.js";
+import { runActivationEngine } from "./activationEngine.js";
+import { buildFaultSummary } from "./faultSummaryBuilder.js";
+import { generateFailLogText, generateFailLogJson } from "./failLogGenerator.js";
 
+/**
+ * Industrial Advanced Injection Engine.
+ * Simulates fault injection into silicon architecture based on STIL metadata.
+ */
 export function runAdvancedInjection(
   stilText: string,
   params: {

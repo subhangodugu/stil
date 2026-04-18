@@ -25,7 +25,7 @@ export const ChipGrid: React.FC<ChipGridProps> = ({ chips, onChipClick, onRefres
     }
 
     try {
-      const response = await fetch(`/api/chip/${id}`, { method: 'DELETE' });
+      const response = await fetch(`/api/data/purge/${id}`, { method: 'DELETE' });
       if (!response.ok) throw new Error("Failed to delete record");
       if (onRefresh) onRefresh();
     } catch (err) {
@@ -98,42 +98,33 @@ export const ChipGrid: React.FC<ChipGridProps> = ({ chips, onChipClick, onRefres
                 </div>
               )}
 
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h4 className="text-white font-bold tracking-tight mb-1 group-hover:text-cyan-400 transition-colors">
+              <div className="flex justify-between items-start mb-4 gap-4">
+                <div className="min-w-0 flex-1">
+                  <h4 className="text-white font-bold tracking-tight mb-1 group-hover:text-cyan-400 transition-colors truncate" title={chip.chip_id}>
                     {chip.chip_id}
                   </h4>
                   <p className="text-[10px] text-slate-500 font-mono truncate" title={chip.batch_name || `Batch ID: ${chip.batch_id}`}>
                     {chip.batch_name || `Batch ID: ${chip.batch_id}`}
                   </p>
-                  <div className="flex items-center gap-1.5 mt-0.5 text-[8px] text-slate-600 font-black uppercase tracking-widest">
+                  <div className="flex items-center gap-1.5 mt-0.5 text-[8px] text-slate-600 font-black uppercase tracking-widest shrink-0">
                     <span className="w-1 h-1 bg-slate-700 rounded-full" />
                     REC: {new Date(chip.created_at).toLocaleString()}
                   </div>
                 </div>
-                {chip.status === 'PASS' ? (
-                  <div className="flex items-center gap-3">
-                    <button 
-                      onClick={(e) => handleDelete(e, chip.id!, chip.chip_id)}
-                      className="p-1.5 text-slate-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
-                      title="Purge Record"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                <div className="flex items-center gap-3 shrink-0">
+                  <button 
+                    onClick={(e) => handleDelete(e, chip.id!, chip.chip_id)}
+                    className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all border border-transparent hover:border-red-500/20"
+                    title="Purge Record"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                  {chip.status === 'PASS' ? (
                     <CheckCircle2 size={18} className="text-emerald-500" />
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-3">
-                    <button 
-                      onClick={(e) => handleDelete(e, chip.id!, chip.chip_id)}
-                      className="p-1.5 text-slate-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
-                      title="Purge Record"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                  ) : (
                     <AlertCircle size={18} className="text-red-500" />
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
 
               <div className="space-y-3">

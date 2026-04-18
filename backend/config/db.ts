@@ -117,6 +117,19 @@ export async function initDB() {
       );
     `);
 
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS ai_insights (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        chip_id INT,
+        failure_hash VARCHAR(255),
+        insight TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX (chip_id),
+        INDEX (failure_hash),
+        FOREIGN KEY (chip_id) REFERENCES chips(id) ON DELETE CASCADE
+      );
+    `);
+
     // 2. Self-Healing Schema Migration Layer: Audit Critical Columns
     console.log("[DATABASE] Running Auto-Sync audit...");
     
@@ -128,6 +141,7 @@ export async function initDB() {
     // Failure Details Table Audit
     await ensureColumnExists("failure_details", "expected_value", "CHAR(1) AFTER flip_flop_position");
     await ensureColumnExists("failure_details", "actual_value", "CHAR(1) AFTER expected_value");
+    await ensureColumnExists("failure_details", "fault_type", "VARCHAR(50) AFTER mismatch_type");
 
     // Analytics Cache Table Audit
     await ensureColumnExists("analytics_cache", "hotspot_summary", "JSON AFTER top_failing_pattern");

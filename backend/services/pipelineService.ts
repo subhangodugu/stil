@@ -18,7 +18,7 @@ export async function runDiagnosticPipeline(files: Express.Multer.File[], batchN
       "INSERT INTO upload_batches(batch_name, total_files) VALUES (?, ?)",
       [finalBatchName, files.length]
     );
-    const batchId = (batchResult as any).insertId;
+    const batchId = (batchResult as { insertId: number }).insertId;
     const results = [];
 
     for (const file of files) {
@@ -66,16 +66,16 @@ export async function runDiagnosticPipeline(files: Express.Multer.File[], batchN
           JSON.stringify(parsed)
         ]
       );
-      const chipInsertId = (chipResult as any).insertId;
+      const chipInsertId = (chipResult as { insertId: number }).insertId;
 
-      for (const chain of inference.failedChains as any[]) {
+      for (const chain of inference.failedChains as { name: string; mismatchCount: number }[]) {
         await connection.execute(
           "INSERT INTO failed_chains (chip_id, chain_name, mismatch_count) VALUES (?, ?, ?)",
           [chipInsertId, chain.name, chain.mismatchCount]
         );
       }
 
-      for (const detail of inference.failureDetails as any[]) {
+      for (const detail of inference.failureDetails as { patternId: string; chainName: string; flipFlopPosition: number; expected: string; actual: string; mismatchType?: string; faultType: string }[]) {
         await connection.execute(
           `INSERT INTO failure_details 
           (chip_id, pattern_id, chain_name, flip_flop_position, expected_value, actual_value, mismatch_type, fault_type) 

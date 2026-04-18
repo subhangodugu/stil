@@ -1,4 +1,5 @@
 import { db } from "../config/db.js";
+import { logger } from "../utils/logger.js";
 
 export interface YieldTrendPoint {
   batchId: number;
@@ -28,12 +29,12 @@ export async function getHistoricalYieldTrend(): Promise<YieldTrendPoint[]> {
       LIMIT 20
     `);
 
-    return (rows as any[]).map(row => ({
+    return (rows as YieldTrendPoint[]).map(row => ({
       ...row,
       avgYield: parseFloat(row.avgYield.toFixed(2))
     }));
   } catch (error) {
-    console.error("Historical yield analysis failed:", error);
+    logger.error("Historical yield analysis failed:", error);
     return [];
   }
 }

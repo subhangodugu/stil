@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { runDiagnosticPipeline } from "../services/pipelineService.js";
 import { runAdvancedInjection } from "../services/advancedInjectionEngine.js";
 import fs from "fs";
+import { logger } from "../utils/logger.js";
 
 export const uploadController = {
   analyze: async (req: Request, res: Response) => {
@@ -24,7 +25,7 @@ export const uploadController = {
         isPersistent: true 
       });
     } catch (error) {
-      console.error("Analysis error:", error);
+      logger.error("Analysis error:", error);
       return res.status(500).json({ error: "Failed to analyze files" });
     }
   },
@@ -38,11 +39,12 @@ export const uploadController = {
 
       const output = await runDiagnosticPipeline(files, "Bulk_Execute_Pipeline");
       return res.json(output);
-    } catch (error: any) {
-      console.error("Bulk analysis error:", error);
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      logger.error("Bulk analysis error:", error);
       return res.status(500).json({ 
         error: "Bulk analysis failed", 
-        message: error.message || "Industrial parallel processing error" 
+        message: err.message || "Industrial parallel processing error" 
       });
     }
   },
@@ -66,7 +68,7 @@ export const uploadController = {
 
       return res.json(result);
     } catch (error) {
-      console.error("Injection error:", error);
+      logger.error("Injection error:", error);
       return res.status(500).json({ error: "Failed to inject fault" });
     }
   }

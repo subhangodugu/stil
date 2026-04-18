@@ -1,4 +1,5 @@
 import { db } from "../config/db.js";
+import { logger } from "../utils/logger.js";
 
 export interface HotspotPoint {
   chainName: string;
@@ -30,12 +31,12 @@ export async function getGlobalHotspots(): Promise<HotspotPoint[]> {
       LIMIT 10
     `);
 
-    return (rows as any[]).map(row => ({
+    return (rows as HotspotPoint[]).map(row => ({
       ...row,
       totalMismatches: Number(row.totalMismatches)
     }));
   } catch (error) {
-    console.error("Hotspot analysis failed:", error);
+    logger.error("Hotspot analysis failed:", error);
     return [];
   }
 }
@@ -56,7 +57,7 @@ export async function getWeakPatterns(): Promise<PatternWeakness[]> {
       LIMIT 10
     `);
 
-    return (rows as any[]).map(row => {
+    return (rows as unknown[]).map((row: Record<string, unknown>) => {
       const count = Number(row.failCount);
       let severity: "HIGH" | "MEDIUM" | "LOW" = "LOW";
       if (count > 50) severity = "HIGH";
@@ -69,7 +70,7 @@ export async function getWeakPatterns(): Promise<PatternWeakness[]> {
       };
     });
   } catch (error) {
-    console.error("Pattern weakness analysis failed:", error);
+    logger.error("Pattern weakness analysis failed:", error);
     return [];
   }
 }

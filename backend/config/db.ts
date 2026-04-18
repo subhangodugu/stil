@@ -1,5 +1,6 @@
 import mysql from "mysql2/promise";
 import dotenv from "dotenv";
+import { logger } from "../utils/logger.js";
 dotenv.config();
 
 export const db = mysql.createPool({
@@ -20,19 +21,19 @@ export const db = mysql.createPool({
 async function ensureColumnExists(table: string, column: string, definition: string) {
   try {
     const [rows] = await db.query(`SHOW COLUMNS FROM ${table} LIKE ?`, [column]);
-    if ((rows as any[]).length === 0) {
-      console.log(`[DATABASE] Auto-Sync: Migrating table "${table}"...`);
+    if ((rows as unknown[]).length === 0) {
+      logger.info(`[DATABASE] Auto-Sync: Migrating table "${table}"...`);
       await db.query(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-      console.log(`[DATABASE] Auto-Sync: Added missing column ${table}.${column} [${definition}]`);
+      logger.info(`[DATABASE] Auto-Sync: Added missing column ${table}.${column} [${definition}]`);
     }
   } catch (error) {
-    console.warn(`[DATABASE] Auto-Sync Error: Failed to audit column ${table}.${column}:`, error);
+    logger.warn(`[DATABASE] Auto-Sync Error: Failed to audit column ${table}.${column}:`, error);
   }
 }
 
 export async function initDB() {
   try {
-    console.log(`📡 Connecting to MySQL at ${process.env.DB_HOST || "127.0.0.1"} as user ${process.env.DB_USER || "root"}...`);
+    logger.info(`📡 Connecting to MySQL at ${process.env.DB_HOST || "127.0.0.1"} as user ${process.env.DB_USER || "root"}...`);
     const connection = await mysql.createConnection({
       host: process.env.DB_HOST || "127.0.0.1",
       port: Number(process.env.DB_PORT) || 3306,
@@ -43,7 +44,7 @@ export async function initDB() {
     await connection.query(`CREATE DATABASE IF NOT EXISTS ${process.env.DB_NAME || "stil_diagnostics"};`);
     await connection.end();
 
-    console.log("[DATABASE] Synchronizing industrial schema...");
+    logger.info("[DATABASE] Synchronizing industrial schema...");
 
     // 1. Core Table Initialization
     await db.query(`
@@ -131,7 +132,7 @@ export async function initDB() {
     `);
 
     // 2. Self-Healing Schema Migration Layer: Audit Critical Columns
-    console.log("[DATABASE] Running Auto-Sync audit...");
+    logger.info("[DATABASE] Running Auto-Sync audit...");
     
     // Chips Table Audit
     await ensureColumnExists("chips", "project_data", "JSON NULL AFTER first_fail_pattern");
@@ -146,19 +147,20 @@ export async function initDB() {
     // Analytics Cache Table Audit
     await ensureColumnExists("analytics_cache", "hotspot_summary", "JSON AFTER top_failing_pattern");
 
-    console.log("[DATABASE] Industrial schema synchronized successfully.");
-    console.log("📡 Connected to MySQL successfully.");
-  } catch (error: any) {
-    if (error.code === 'ER_ACCESS_DENIED_ERROR') {
-      console.error("\n❌ Database Access Denied!");
-      console.error("--------------------------------------------------");
-      console.error(`Status: ${error.message}`);
-      console.error(`Attempted Connection: user "${process.env.DB_USER || "root"}" at ${process.env.DB_HOST || "127.0.0.1"}`);
-      console.error("\nPlease ensure your .env file has the CORRECT password for your local MySQL.");
-      console.error("If you don't have a password, leave DB_PASSWORD blank in .env.");
-      console.error("--------------------------------------------------\n");
+    logger.info("[DATABASE] Industrial schema synchronized successfully.");
+    logger.info("📡 Connected to MySQL successfully.");
+  } catch (error: unknown) {
+    const err = error as { code?: string; message?: string };
+    if (err.code === 'ER_ACCESS_DENIED_ERROR') {
+      logger.error("\n❌ Database Access Denied!");
+      logger.error("--------------------------------------------------");
+      logger.error(`Status: ${err.message}`);
+      logger.error(`Attempted Connection: user "${process.env.DB_USER || "root"}" at ${process.env.DB_HOST || "127.0.0.1"}`);
+      logger.error("\nPlease ensure your .env file has the CORRECT password for your local MySQL.");
+      logger.error("If you don't have a password, leave DB_PASSWORD blank in .env.");
+      logger.error("--------------------------------------------------\n");
     } else {
-      console.error("Database initialization failed:", error);
+      logger.error("Database initialization failed:", error);
     }
   }
 }

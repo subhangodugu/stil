@@ -1,4 +1,5 @@
 import { db } from "../config/db.js";
+import { logger } from "../utils/logger.js";
 
 export interface FaultCluster {
   clusterId: string;
@@ -27,15 +28,15 @@ export async function getRootCauseClusters(): Promise<FaultCluster[]> {
       LIMIT 10
     `);
 
-    return (rows as any[]).map((row, idx) => ({
+    return (rows as { representativeChain: string; affectedChips: number; coincidenceCount: number }[]).map((row, idx) => ({
       clusterId: `CLUSTER_ALPHA_${idx + 1}`,
-      representativeChain: row.representativeChain,
-      affectedChips: row.affectedChips,
-      patternCoincidence: row.coincidenceCount,
-      confidence: Math.min(0.99, 0.4 + (row.affectedChips * 0.1))
+      representativeChain: row.representativeChain as string,
+      affectedChips: row.affectedChips as number,
+      patternCoincidence: row.coincidenceCount as number,
+      confidence: Math.min(0.99, 0.4 + ((row.affectedChips as number) * 0.1))
     }));
   } catch (error) {
-    console.error("Root cause clustering failed:", error);
+    logger.error("Root cause clustering failed:", error);
     return [];
   }
 }

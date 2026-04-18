@@ -44,7 +44,7 @@ export function buildFaultSummary(
 
   return {
     faultId,
-    faultType: [...new Set(userParams.targets.map(t => t.faultType))].join('/') as any,
+    faultType: [...new Set(userParams.targets.map(t => t.faultType))].join('/') as 'SA0' | 'SA1',
     affectedChain: userParams.targets.map(t => t.chainName).join(', '),
     affectedShiftBit: userParams.targets[0]?.bitPosition || 0,
     totalPatterns: stilMetadata.totalPatterns,

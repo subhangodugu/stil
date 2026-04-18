@@ -1,4 +1,5 @@
 import { db } from "../config/db.js";
+import { logger } from "../utils/logger.js";
 
 export interface BatchComparison {
   batchId: number;
@@ -36,14 +37,14 @@ export async function compareBatches(): Promise<BatchComparison[]> {
       LIMIT 5
     `);
 
-    return (rows as any[]).map(row => ({
+    return (rows as BatchComparison[]).map(row => ({
       ...row,
       avgYield: parseFloat((row.avgYield || 0).toFixed(2)),
       mismatchCount: Number(row.mismatchCount || 0),
       topFailingChain: row.topFailingChain || "None"
     }));
   } catch (error) {
-    console.error("Batch comparison failed:", error);
+    logger.error("Batch comparison failed:", error);
     return [];
   }
 }

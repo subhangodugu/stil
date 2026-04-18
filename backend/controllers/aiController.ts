@@ -2,6 +2,12 @@ import { Request, Response } from "express";
 import { generateAIInsight } from "../services/aiService.js";
 import { db } from "../config/db.js";
 import crypto from "crypto";
+import { logger } from "../utils/logger.js";
+
+interface CachedInsight {
+  insight: string;
+  created_at: string;
+}
 
 export const aiController = {
   getInsight: async (req: Request, res: Response) => {
@@ -16,16 +22,18 @@ export const aiController = {
       const failureHash = crypto.createHash('sha256').update(failureSummary).digest('hex');
 
       // 2. Check Database Cache
-      const [existing]: any = await db.query(
+      const [existing] = await db.query(
         "SELECT insight, created_at FROM ai_insights WHERE chip_id = ? AND failure_hash = ? LIMIT 1",
         [chipId, failureHash]
       );
 
-      if (existing.length > 0) {
+      const cachedRows = existing as CachedInsight[];
+
+      if (cachedRows.length > 0) {
         return res.json({ 
-          insight: existing[0].insight, 
+          insight: cachedRows[0].insight, 
           source: 'cache',
-          generatedAt: existing[0].created_at 
+          generatedAt: cachedRows[0].created_at 
         });
       }
 
@@ -44,7 +52,7 @@ export const aiController = {
         generatedAt: new Date()
       });
     } catch (error) {
-      console.error("[AI CONTROLLER ERROR]", error);
+      logger.error("[AI CONTROLLER ERROR]", error);
       return res.status(500).json({ error: "Failed to generate AI insight" });
     }
   }

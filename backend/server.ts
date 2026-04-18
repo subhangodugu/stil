@@ -11,6 +11,7 @@ import uploadRoutes from "./routes/uploadRoutes.js";
 import analyticsRoutes from "./routes/analyticsRoutes.js";
 import chipRoutes from "./routes/chipRoutes.js";
 import aiRoutes from "./routes/aiRoutes.js";
+import { logger } from "./utils/logger.js";
 
 async function startServer() {
   const app = express();
@@ -43,23 +44,25 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   } else {
-    console.log("🛠️  Development Mode: API Server only. Frontend should run via 'npm run dev'");
+    logger.info("🛠️  Development Mode: API Server only. Frontend should run via 'npm run dev'");
     app.get('/', (req, res) => {
       res.send("STIL Analyzer API is running. Access the frontend via Vite dev server.");
     });
   }
 
   // 5. Global Error Handling (Industrial Grade)
-  app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-    console.error("[CRITICAL SERVER ERROR]", err);
-    res.status(err.status || 500).json({ 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+    const errorBody = err as { status?: number; message?: string };
+    logger.error("[CRITICAL SERVER ERROR]", err);
+    res.status(errorBody.status || 500).json({ 
       error: "Industrial System Error", 
-      message: process.env.NODE_ENV === 'production' ? "Internal server error" : err.message 
+      message: process.env.NODE_ENV === 'production' ? "Internal server error" : errorBody.message 
     });
   });
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`
+    logger.info(`
 🚀 INDUSTRIAL DIAGNOSTIC CORE ACTIVE
 --------------------------------------------------
 PORT: ${PORT}
@@ -72,6 +75,6 @@ ENV: ${process.env.NODE_ENV || 'development'}
 }
 
 startServer().catch(err => {
-  console.error("FATAL: System failed to boot:", err);
+  logger.error("FATAL: System failed to boot:", err);
   process.exit(1);
 });

@@ -1,5 +1,28 @@
 import { Request, Response } from "express";
 import { db } from "../config/db.js";
+import { logger } from "../utils/logger.js";
+
+interface DatabaseChip {
+  id: number;
+  batch_id: number;
+  chip_id: string;
+  status: string;
+  mismatches: number;
+  yield_percent: number;
+  total_scan_chains: number;
+  total_flip_flops: number;
+  total_patterns: number;
+  first_fail_pattern: string | null;
+  created_at: string;
+  batch_name: string;
+  upload_timestamp: string;
+}
+
+interface FailedChain {
+  chip_id: number;
+  chain_name: string;
+  mismatch_count: number;
+}
 
 export const chipController = {
   getSummary: async (req: Request, res: Response) => {
@@ -17,16 +40,16 @@ export const chipController = {
       
       const [failedChains] = await db.query("SELECT * FROM failed_chains");
       
-      const result = (chips as any[]).map(chip => ({
+      const result = (chips as DatabaseChip[]).map(chip => ({
         ...chip,
-        failedChains: (failedChains as any[])
+        failedChains: (failedChains as FailedChain[])
           .filter(fc => fc.chip_id === chip.id)
           .map(fc => fc.chain_name)
       }));
 
       return res.json(result);
     } catch (error) {
-      console.error("Summary fetch error:", error);
+      logger.error("Summary fetch error:", error);
       return res.status(500).json({ error: "Failed to fetch summary" });
     }
   },
@@ -35,10 +58,10 @@ export const chipController = {
     try {
       const { chipId } = req.params;
       const [chips] = await db.query("SELECT * FROM chips WHERE id = ?", [chipId]);
-      if ((chips as any[]).length === 0) {
+      if ((chips as DatabaseChip[]).length === 0) {
         return res.status(404).json({ error: "Chip not found" });
       }
-      const chip = (chips as any[])[0];
+      const chip = (chips as DatabaseChip[])[0];
 
       const [details] = await db.query("SELECT * FROM failure_details WHERE chip_id = ?", [chipId]);
       const [chains] = await db.query("SELECT * FROM failed_chains WHERE chip_id = ?", [chipId]);
@@ -49,7 +72,7 @@ export const chipController = {
         failureDetails: details
       });
     } catch (error) {
-      console.error("Failure details fetch error:", error);
+      logger.error("Failure details fetch error:", error);
       return res.status(500).json({ error: "Failed to fetch failure details" });
     }
   },
@@ -58,7 +81,7 @@ export const chipController = {
     try {
       const [batches] = await db.query("SELECT * FROM upload_batches ORDER BY upload_timestamp DESC");
       return res.json(batches);
-    } catch (error) {
+    } catch {
       return res.status(500).json({ error: "Failed to fetch batches" });
     }
   },
@@ -68,12 +91,12 @@ export const chipController = {
       const { id } = req.params;
       await db.query("DELETE FROM chips WHERE id = ?", [id]);
       return res.json({ success: true, message: "Record purged successfully" });
-    } catch (error) {
-      console.error("Deletion failed:", error);
+    } catch {
+      logger.error("Deletion failed");
       return res.status(500).json({ error: "Failed to delete diagnostic record" });
     }
   },
-
+ 
   resetAll: async (req: Request, res: Response) => {
     try {
       await db.query("DELETE FROM failure_details");
@@ -82,8 +105,8 @@ export const chipController = {
       await db.query("DELETE FROM chips");
       await db.query("DELETE FROM upload_batches");
       return res.json({ success: true, message: "All diagnostic data cleared" });
-    } catch (error) {
-      console.error("Global reset failed:", error);
+    } catch {
+      logger.error("Global reset failed");
       return res.status(500).json({ error: "Failed to clear records" });
     }
   }

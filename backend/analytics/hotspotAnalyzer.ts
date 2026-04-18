@@ -57,7 +57,7 @@ export async function getWeakPatterns(): Promise<PatternWeakness[]> {
       LIMIT 10
     `);
 
-    return (rows as unknown[]).map((row: Record<string, unknown>) => {
+    return (rows as Record<string, unknown>[]).map(row => {
       const count = Number(row.failCount);
       let severity: "HIGH" | "MEDIUM" | "LOW" = "LOW";
       if (count > 50) severity = "HIGH";

@@ -26,7 +26,7 @@ router.post(
   uploadController.bulkAnalyze
 );
 
-// Advanced Fault Injection
+// Advanced Fault Injection (accepts STIL file OR pre-parsed projectDataJson)
 router.post(
   "/inject-fault", 
   upload.single("stil"), 

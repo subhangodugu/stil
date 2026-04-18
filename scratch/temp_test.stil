@@ -1,0 +1,20 @@
+STIL 1.0;
+Signals {
+  "SI" { Type In; }
+  "SO" { Type Out; }
+  "CLK" { Type In; }
+}
+ScanStructures {
+  ScanChain "Chain1" {
+    ScanIn SI;
+    ScanOut SO;
+    Length 50;
+  }
+}
+PatternBurst "MainBurst" {
+  PatList { "MainPat" }
+}
+Pattern "MainPat" {
+  V { SI=00111; CLK=0; SO=LLLLL; }
+  V { SI=11100; CLK=1; SO=HHHHH; }
+}

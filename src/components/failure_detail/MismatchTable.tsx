@@ -1,12 +1,29 @@
 import React from 'react';
 import { Terminal } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { getFaultDisplay } from '../../lib/faultTerminology';
 
 interface Props {
   details: any[];
 }
 
 export default function MismatchTable({ details }: Props) {
+  if (!details || details.length === 0) {
+    return (
+      <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden flex flex-col h-full">
+        <div className="p-6 border-b border-slate-800">
+          <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
+            <Terminal className="text-cyan-500" size={16} />
+            Pattern-Level Mismatch Log
+          </h3>
+        </div>
+        <div className="flex-1 flex items-center justify-center py-16 border-2 border-dashed border-slate-800/50 m-4 rounded-xl">
+          <p className="text-slate-600 text-xs font-black uppercase tracking-widest">No mismatch records — chip passed all patterns</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden flex flex-col h-full">
       <div className="p-6 border-b border-slate-800 flex justify-between items-center">
@@ -53,11 +70,11 @@ export default function MismatchTable({ details }: Props) {
                 <td className="px-6 py-3">
                   <span className={cn(
                     "text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest border",
-                    row.fault_type === 'STUCK_AT_0' ? "bg-red-500/10 text-red-400 border-red-500/20" :
-                    row.fault_type === 'STUCK_AT_1' ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
+                    row.fault_type === 'STUCK_AT_0' ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
+                    row.fault_type === 'STUCK_AT_1' ? "bg-red-500/10 text-red-400 border-red-500/20" :
                     "bg-slate-800 text-slate-400 border-slate-700"
                   )}>
-                    {row.fault_type || 'UNKNOWN'}
+                    {getFaultDisplay(row.fault_type).long}
                   </span>
                 </td>
                 <td className="px-6 py-3">

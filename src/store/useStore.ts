@@ -41,6 +41,9 @@ export interface ProjectData {
   scanChains: ScanChain[];
   hasEDT: boolean;
   totalFFs: number;
+  patternCount: number;
+  vectorCount: number;
+  testerCycles: number;
   totalPatterns: number;
   signals: Record<string, string>;
   faults: Fault[];
@@ -49,6 +52,17 @@ export interface ProjectData {
   schemaVersion?: number;
   topologyFaultMap?: Array<{ chainName: string; mismatchCount: number; severity: string }>;
   localizedFaults?: Array<{ patternId: string; chainName: string; ffPosition: number; expected: string; actual: string }>;
+  debugReport?: {
+    patternBurstsFound: number;
+    proceduresFound: number;
+    expandedPatterns: number;
+    scanVectorsExtracted: number;
+    pinDetectionMode: 'explicit' | 'heuristic';
+    mappedScanOutPins: string[];
+    executionGraph: string[];
+    mappingLogs: string[];
+  };
+  dataSource?: 'ATE_LOG' | 'SIMULATED' | 'INFERRED';
 }
 
 interface AppState {
@@ -64,6 +78,14 @@ interface AppState {
   
   viewMode: 'topology' | 'schematic' | 'injection' | 'dashboard' | 'analytics';
   dashboardChips: any[];
+  
+  streamingMetrics: {
+    currentCycle: number;
+    totalCycles: number;
+    currentPattern: string;
+    mismatchCount: number;
+    isStreaming: boolean;
+  };
   
   analyticsData: {
     yieldTrend: any[];
@@ -83,6 +105,7 @@ interface AppState {
   setStilText: (stilText: string | null) => void;
   setGeneratedResults: (log: string | null, json: any | null) => void;
   setDashboardChips: (chips: any[]) => void;
+  updateStreamingMetrics: (metrics: Partial<AppState['streamingMetrics']>) => void;
   reset: () => void;
 }
 
@@ -104,6 +127,14 @@ export const useStore = create<AppState>((set) => ({
   },
   dashboardChips: [],
   
+  streamingMetrics: {
+    currentCycle: 0,
+    totalCycles: 0,
+    currentPattern: 'Initialization...',
+    mismatchCount: 0,
+    isStreaming: false,
+  },
+  
   viewMode: 'dashboard', 
   
   setProjectData: (data) => set({ projectData: data }),
@@ -117,6 +148,8 @@ export const useStore = create<AppState>((set) => ({
   setStilText: (stilText) => set({ stilText }),
   setGeneratedResults: (log, json) => set({ generatedLog: log, generatedJsonOutput: json }),
   setDashboardChips: (chips) => set({ dashboardChips: chips }),
-  reset: () => set({ projectData: null, failingFFs: {}, selectedChain: null, error: null, injectionTargets: [], stilText: null, generatedLog: null, generatedJsonOutput: null, viewMode: 'dashboard', dashboardChips: [], analyticsData: { yieldTrend: [], hotspots: [], patterns: [], clusters: [] } }),
+  updateStreamingMetrics: (metrics) => set((state) => ({ 
+    streamingMetrics: { ...state.streamingMetrics, ...metrics } 
+  })),
+  reset: () => set({ projectData: null, failingFFs: {}, selectedChain: null, error: null, injectionTargets: [], stilText: null, generatedLog: null, generatedJsonOutput: null, viewMode: 'dashboard', dashboardChips: [], analyticsData: { yieldTrend: [], hotspots: [], patterns: [], clusters: [] }, streamingMetrics: { currentCycle: 0, totalCycles: 0, currentPattern: 'Initialization...', mismatchCount: 0, isStreaming: false } }),
 }));
-

@@ -7,6 +7,7 @@ export interface FailureDetail {
   expected: string;
   actual: string;
   mismatchType: string;
+  faultType: string;
 }
 
 export interface ChipTestResult {
@@ -40,17 +41,29 @@ export function inferChipResult(parsed: STILUnified): ChipTestResult {
       // Extract position from FF ID (e.g., "FF_42" -> 42)
       const ffPosMatch = f.ff.match(/\d+/);
       const ffPosition = ffPosMatch ? parseInt(ffPosMatch[0]) : 0;
+
+      // Map Fault type to DB-compatible fault_type
+      const faultTypeMap: Record<string, string> = {
+        'STUCK_AT_0': 'STUCK_AT_0',
+        'STUCK_AT_1': 'STUCK_AT_1',
+        'CHAIN_BREAK': 'STUCK_AT_0',
+        'INTERMITTENT': 'INTERMITTENT',
+      };
+      const faultType = faultTypeMap[f.faultType] || 'UNKNOWN';
       
-      const patId = `PAT_${200 + i}`;
+      // Determine a realistic Pattern ID using the pattern count or actual patterns
+      const patIndex = Math.min(i, parsed.patterns.length - 1);
+      const patId = parsed.patterns[patIndex]?.patternId || `PAT_INF_${i.toString().padStart(3, '0')}`;
       if (!firstFailPattern) firstFailPattern = patId;
 
       failureDetails.push({
         patternId: patId,
         chainName: f.channel,
         flipFlopPosition: ffPosition,
-        expected: '1', // Default expected for stuck-at simulation
-        actual: '0',
-        mismatchType: f.faultType
+        expected: faultType === 'STUCK_AT_1' ? '0' : '1',
+        actual:   faultType === 'STUCK_AT_1' ? '1' : '0',
+        mismatchType: f.faultType,
+        faultType,
       });
     });
 

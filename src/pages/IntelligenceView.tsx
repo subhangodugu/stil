@@ -1,11 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   BarChart3, Brain, Activity, 
   RefreshCcw, ShieldAlert, Database,
-  ArrowRight
+  ArrowRight, LayoutDashboard, Search, Cpu, ListOrdered, Share2, Zap, Shield
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import DiagnosticAuditPanel from '../components/failure_detail/DiagnosticAuditPanel';
+import { AIInsightPanel } from '../components/AIInsightPanel';
+
+import { cn } from '../lib/utils';
 
 // Components
 import { YieldTrendChart } from '../components/analytics/YieldTrendChart';
@@ -16,9 +20,10 @@ import { PredictiveAlertBanner } from '../components/analytics/PredictiveAlertBa
 import { BatchComparisonView } from '../components/analytics/BatchComparisonView';
 
 export default function IntelligenceView() {
-  const { analyticsData, setAnalyticsData, setError } = useStore();
+  const { analyticsData, setAnalyticsData, setError, projectData } = useStore();
   const [loading, setLoading] = useState(true);
   const [comparison, setComparison] = useState<any>(null);
+  const [activeTab, setActiveTab] = useState<'SUMMARY' | 'AUDIT' | 'INSIGHTS'>('SUMMARY');
 
   const fetchAnalytics = async () => {
     setLoading(true);
@@ -132,50 +137,83 @@ export default function IntelligenceView() {
 
       <PredictiveAlertBanner alerts={alerts} />
 
-      {/* Grid Layer 1: Trend & Hotspots */}
-      <div className="grid grid-cols-12 gap-8 mb-8">
-        <div className="col-span-12 xl:col-span-8">
-          <YieldTrendChart data={analyticsData.yieldTrend} />
-        </div>
-        <div className="col-span-12 xl:col-span-4">
-          <BatchComparisonView comparison={comparison} />
-        </div>
+      {/* Tab Switcher */}
+      <div className="flex bg-slate-900/40 backdrop-blur-md border border-slate-800 p-1.5 rounded-2xl w-fit mb-8">
+        {(['SUMMARY', 'AUDIT', 'INSIGHTS'] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={cn(
+              "px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all",
+              activeTab === tab 
+                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/20" 
+                : "text-slate-500 hover:text-slate-300 hover:bg-slate-800/50"
+            )}
+          >
+            {tab}
+          </button>
+        ))}
       </div>
 
-      <div className="grid grid-cols-12 gap-8 mb-8">
-        <div className="col-span-12 xl:col-span-8">
-          <RootCauseClusterPanel clusters={analyticsData.clusters} />
-        </div>
-        <div className="col-span-12 xl:col-span-4">
-          <FailureHotspotHeatmap hotspots={analyticsData.hotspots} />
-        </div>
-      </div>
+      <AnimatePresence mode="wait">
+        {activeTab === 'SUMMARY' && (
+          <motion.div 
+            key="summary"
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.02 }}
+            className="space-y-8"
+          >
+            {/* Grid Layer 1: Trend & Hotspots */}
+            <div className="grid grid-cols-12 gap-8 mb-8">
+              <div className="col-span-12 xl:col-span-8">
+                <YieldTrendChart data={analyticsData.yieldTrend} />
+              </div>
+              <div className="col-span-12 xl:col-span-4">
+                <BatchComparisonView comparison={comparison} />
+              </div>
+            </div>
 
-      <div className="grid grid-cols-12 gap-8">
-        <div className="col-span-12">
-          <PatternWeaknessChart patterns={analyticsData.patterns} />
-        </div>
-      </div>
+            <div className="grid grid-cols-12 gap-8 mb-8">
+              <div className="col-span-12 xl:col-span-8">
+                <RootCauseClusterPanel clusters={analyticsData.clusters} />
+              </div>
+              <div className="col-span-12 xl:col-span-4">
+                <FailureHotspotHeatmap hotspots={analyticsData.hotspots} />
+              </div>
+            </div>
 
-      {/* Footer Industrial Decoration */}
-      <div className="mt-16 pt-10 border-t border-slate-800/50 flex flex-col md:flex-row justify-between items-center gap-6 text-[10px] font-black text-slate-600 uppercase tracking-widest">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 group cursor-pointer hover:text-indigo-400 transition-colors">
-            <Database size={14} /> PERSISTENT_RECORDS: {analyticsData.yieldTrend.length} BATCHES
-          </div>
-          <span className="w-1 h-1 bg-slate-800 rounded-full" />
-          <div className="flex items-center gap-2 group cursor-pointer hover:text-indigo-400 transition-colors">
-            <Brain size={14} /> INFERENCE_ENGINE: STABLE
-          </div>
-        </div>
-        
-        <div className="flex items-center gap-3 bg-slate-900/50 px-4 py-2 rounded-full border border-slate-800">
-          <span className="text-slate-500">Cross-Batch Delta:</span>
-          <span className="text-emerald-500 flex items-center gap-1">
-            +0.4% Improvement <ArrowRight size={10} />
-          </span>
-        </div>
-      </div>
+            <div className="grid grid-cols-12 gap-8">
+              <div className="col-span-12">
+                <PatternWeaknessChart patterns={analyticsData.patterns} />
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {activeTab === 'AUDIT' && (
+          <motion.div
+            key="audit"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+          >
+            <DiagnosticAuditPanel />
+          </motion.div>
+        )}
+
+        {activeTab === 'INSIGHTS' && (
+          <motion.div
+            key="insights"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="min-h-[400px]"
+          >
+            <AIInsightPanel />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

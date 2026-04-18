@@ -12,14 +12,24 @@ export default function FailedChainHeatmap({ failedChains, allChainsCount }: Pro
   // We'll render a grid of squares representing all chains.
   // Failed ones will be red, healthy ones will be green/blue.
   
-  const chains = Array.from({ length: allChainsCount }).map((_, i) => {
-    const chainName = `Chain_${i}`;
-    const fail = failedChains.find(fc => fc.chain_name === chainName);
-    return {
-      name: chainName,
-      failCount: fail ? fail.mismatch_count : 0
-    };
-  });
+  // 1. Map existing failures by their name
+  const failedMap = new Map<string, number>();
+  failedChains.forEach(fc => failedMap.set(fc.name, fc.mismatchCount));
+  
+  // 2. Identify all failed chains (the ones passed in)
+  const failedList = failedChains.map(fc => ({
+    name: fc.name,
+    failCount: fc.mismatchCount
+  }));
+
+  // 3. Fill the rest with healthy chains up to total count
+  const healthyCount = Math.max(0, allChainsCount - failedList.length);
+  const healthyList = Array.from({ length: healthyCount }, (_, i) => ({
+    name: `Chain_${failedList.length + i}`,
+    failCount: 0
+  }));
+
+  const chains = [...failedList, ...healthyList];
 
   return (
     <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 h-full">

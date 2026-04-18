@@ -3,6 +3,7 @@ import { useStore, ScanChain } from '../store/useStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LayoutGrid, Download, FileText } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { getFaultDisplay } from '../lib/faultTerminology';
 
 type ScanChainWithRange = ScanChain & {
   range: {
@@ -251,7 +252,7 @@ export const HardwareTopology: React.FC = () => {
                       filter="url(#red-glow)"
                     >
                       <animateMotion
-                        dur={`${2 + Math.random() * 2}s`}
+                        dur="1.5s"
                         repeatCount="indefinite"
                         path={d}
                       />
@@ -293,7 +294,7 @@ export const HardwareTopology: React.FC = () => {
                       <circle cx="-15" y={channelHeight / 2 - 2} r="6" fill="currentColor" className="animate-ping opacity-20" />
                       <circle cx="-15" y={channelHeight / 2 - 2} r="3" fill="currentColor" />
                       <text x={channelWidth + 15} y={channelHeight / 2 + 6} fill={injectionColor!} fontSize="10" fontWeight="900" className="uppercase tracking-widest">
-                        {inj?.SA0 && inj?.SA1 ? 'Mixed-Mode Target' : (inj?.SA0 ? 'SA0 Target' : 'SA1 Target')}
+                        {inj?.SA0 && inj?.SA1 ? 'Mixed-Mode Target' : (inj?.SA0 ? getFaultDisplay('SA0').short : getFaultDisplay('SA1').short)}
                       </text>
                     </motion.g>
                   )}
@@ -338,7 +339,7 @@ export const HardwareTopology: React.FC = () => {
                     <g transform={`translate(${channelWidth + 10}, 0)`}>
                       <rect width="100" height={channelHeight - 4} rx="4" fill="#ef4444" />
                       <text x="50" y={channelHeight / 2 - 2} textAnchor="middle" fill="white" fontSize="8" fontWeight="bold" className="uppercase tracking-tighter">
-                        {fault.faultType}
+                        {getFaultDisplay(fault.faultType).long}
                       </text>
                       <text x="50" y={channelHeight / 2 + 8} textAnchor="middle" fill="white" fontSize="7" className="opacity-80">
                         {fault.ff} | {fault.confidence}%

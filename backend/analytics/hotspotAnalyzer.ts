@@ -64,7 +64,7 @@ export async function getWeakPatterns(): Promise<PatternWeakness[]> {
       else if (count > 20) severity = "MEDIUM";
       
       return { 
-        patternId: row.patternId, 
+        patternId: row.patternId as string, 
         failCount: count,
         severity 
       };

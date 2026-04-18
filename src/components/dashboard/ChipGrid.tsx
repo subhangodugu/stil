@@ -140,7 +140,17 @@ export const ChipGrid: React.FC<ChipGridProps> = ({ chips, onChipClick, onRefres
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Patterns</span>
-                  <span className="text-xs font-mono text-slate-300">{chip.total_patterns.toLocaleString()}</span>
+                  <span className="text-xs font-mono text-white">{(chip.total_patterns || chip.resolved_patterns).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Vectors</span>
+                  <span className="text-xs font-mono text-indigo-400">{(chip.total_vectors || 0).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Accuracy</span>
+                  <span className={`text-xs font-black ${chip.accuracy != null ? (chip.accuracy >= 99 ? 'text-emerald-400' : chip.accuracy >= 95 ? 'text-amber-400' : 'text-red-400') : 'text-slate-600'}`}>
+                    {chip.accuracy != null ? `${Number(chip.accuracy).toFixed(2)}%` : 'N/A'}
+                  </span>
                 </div>
                 {chip.status === 'FAIL' && chip.first_fail_pattern && (
                   <div className="flex justify-between items-center pt-1">
@@ -149,6 +159,19 @@ export const ChipGrid: React.FC<ChipGridProps> = ({ chips, onChipClick, onRefres
                       {chip.first_fail_pattern}
                     </span>
                   </div>
+                )}
+                {chip.data_source && (
+                   <div className="flex justify-between items-center pt-1">
+                     <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Source</span>
+                     <span className={cn(
+                       "text-[8px] font-black uppercase tracking-tighter px-1.5 py-0.5 rounded border",
+                       chip.data_source === 'ATE_LOG' ? "bg-cyan-500/10 border-cyan-500/20 text-cyan-400" :
+                       chip.data_source === 'INFERRED' ? "bg-amber-500/10 border-amber-500/20 text-amber-500" :
+                       "bg-slate-500/10 border-slate-500/20 text-slate-500"
+                     )}>
+                       {chip.data_source.replace('_', ' ')}
+                     </span>
+                   </div>
                 )}
               </div>
 

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { LayoutGrid, AlertTriangle, ShieldCheck, Cpu, Info } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { cn } from '../../lib/utils';
+import { getFaultDisplay } from '../../lib/faultTerminology';
 
 export default function InDepthTopologySection() {
   const { projectData } = useStore();
@@ -130,7 +131,7 @@ export default function InDepthTopologySection() {
                           <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest flex items-center gap-2">
                             Fault Localized
                             <span className="text-[8px] px-1.5 py-0.5 bg-red-500/20 text-red-400 rounded border border-red-500/30">
-                              {hoveredBit.expected === '1' && hoveredBit.actual === '0' ? 'STUCK-AT-0 (SA0)' : hoveredBit.expected === '0' && hoveredBit.actual === '1' ? 'STUCK-AT-1 (SA1)' : 'LOGIC MISMATCH'}
+                              {hoveredBit.expected === '1' && hoveredBit.actual === '0' ? getFaultDisplay('SA0').long : hoveredBit.expected === '0' && hoveredBit.actual === '1' ? getFaultDisplay('SA1').long : 'LOGIC MISMATCH'}
                             </span>
                           </p>
                           <p className="text-xs font-bold text-white">

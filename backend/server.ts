@@ -13,30 +13,76 @@ import chipRoutes from "./routes/chipRoutes.js";
 import aiRoutes from "./routes/aiRoutes.js";
 import { logger } from "./utils/logger.js";
 
+import { createServer } from "http";
+import { WebSocketServer } from "ws";
+import { streamDeterministicSimulation } from "./services/deterministicEngine.js";
+
 async function startServer() {
   const app = express();
+  const httpServer = createServer(app);
   const PORT = Number(process.env.PORT ?? 3000);
 
-  // 1. Initialize Database Self-Healing Layer
+  // 1. Initialize WebSocket Server for Real-Time Telemetry
+  const wss = new WebSocketServer({ server: httpServer });
+
+  wss.on("connection", (ws) => {
+    logger.info("🔌 Live Diagnostic Client Connected");
+
+    ws.on("message", async (message) => {
+      try {
+        const { type, payload } = JSON.parse(message.toString());
+
+        if (type === "START_STREAMING_DIAGNOSTIC") {
+          const { parsedSTIL, logMap } = payload;
+          logger.info(`🚀 Starting Streaming Diagnostic for ${parsedSTIL.patternBurst}`);
+
+          // Industrial Throtte: avoid saturated buffers
+          let cycleBatch = [];
+          const THROTTLE_SHUTTLE = 1000; 
+
+          for await (const result of streamDeterministicSimulation(parsedSTIL.patterns, logMap)) {
+            cycleBatch.push(result);
+
+            if (cycleBatch.length >= THROTTLE_SHUTTLE) {
+              ws.send(JSON.stringify({ type: "TELEMETRY_BATCH", data: cycleBatch }));
+              cycleBatch = [];
+              // Tiny yield to prevent event loop starvation on large files
+              await new Promise(r => setTimeout(r, 0));
+            }
+          }
+
+          // Flush remaining
+          if (cycleBatch.length > 0) {
+            ws.send(JSON.stringify({ type: "TELEMETRY_BATCH", data: cycleBatch }));
+          }
+
+          ws.send(JSON.stringify({ type: "DIAGNOSTIC_COMPLETE" }));
+        }
+      } catch (err) {
+        logger.error("WebSocket Stream Error:", err);
+        ws.send(JSON.stringify({ type: "ERROR", message: "Streaming failed" }));
+      }
+    });
+
+    ws.on("close", () => logger.info("🔌 Client Disconnected"));
+  });
+
+  // (rest of the express setup remains same, just replacing app.listen with httpServer.listen)
   await initDB();
 
-  // 2. Critical Middleware
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  // Ensure uploads directory exists for industrial ingestion
   const uploadDir = path.join(process.cwd(), 'uploads');
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
   }
 
-  // 3. Modular API Surface Mounting (Zero-Logic Entry Point)
   app.use("/api/uploads", uploadRoutes);
   app.use("/api/analytics", analyticsRoutes);
   app.use("/api/data", chipRoutes); 
   app.use("/api/ai", aiRoutes);
 
-  // 4. Serve Frontend in Production / Vite Middleware in Dev
   if (process.env.NODE_ENV === 'production') {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
@@ -50,8 +96,6 @@ async function startServer() {
     });
   }
 
-  // 5. Global Error Handling (Industrial Grade)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
     const errorBody = err as { status?: number; message?: string };
     logger.error("[CRITICAL SERVER ERROR]", err);
@@ -61,20 +105,17 @@ async function startServer() {
     });
   });
 
-  app.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, "0.0.0.0", () => {
     logger.info(`
-🚀 INDUSTRIAL DIAGNOSTIC CORE ACTIVE
+🚀 INDUSTRIAL DIAGNOSTIC CORE ACTIVE (WS ENABLED)
 --------------------------------------------------
 PORT: ${PORT}
 DB STATUS: CONNECTED & SYNCHRONIZED
 LOGIC LAYER: MODULAR & DECOUPLED
-ENV: ${process.env.NODE_ENV || 'development'}
+TELEMETRY: WEBSOCKET STREAMING READY
 --------------------------------------------------
     `);
   });
 }
 
-startServer().catch(err => {
-  logger.error("FATAL: System failed to boot:", err);
-  process.exit(1);
-});
+startServer();

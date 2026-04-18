@@ -1,0 +1,66 @@
+STIL 1.0;
+
+Header  {
+Title "MY_TOP_MY_DES_stuck_with_init_stil_gz" ;
+  Date     "Thu Sep  4 15:16:39 2025" ;
+  Source  "Tessent Shell  2021.3" ;
+  History  {
+    Ann {*  Begin_Verify_Section  *}
+    Ann {*    tcd_signature     = e1611a559a9a80a5f5773bfa8f29e0ff  *}
+    Ann {*    format            = STIL  *}
+    Ann {*    serial_flag       = OFF  *}
+    Ann {*    test_set_type     = EDT_SCAN_TEST  *}
+    Ann {*    pad_value         = 0  *}
+    Ann {*    pattern_begin     = 0  *}
+    Ann {*    pattern_end       = 0  *}
+    Ann {*    one_setup         = ON  *}
+    Ann {*    no_initialization = OFF  *}
+    Ann {*    pattern_checksum  = 1  *}
+    Ann {*    edt_external      = ON  *}
+    Ann {*  End_Verify_Section  *}
+  }
+}
+
+Signals {
+  "XI" In; "TEST" In; "RESETN" In; "OLDI_VREF" In; "PVT_VM_LO" In; "PVT_VM_HI0" In; "PVT_VM_HI1" In; "PVT_VM_HI2" In; 
+  "XO" Out; 
+  "BSEN" InOut; "TRSTN" InOut; "TDI" InOut; "TDO" InOut; "TMS" InOut; "TCK" InOut; "NETCLK" InOut; "SRCLK" InOut; "SPI0_SCLK" InOut; 
+}
+
+SignalGroups {
+  _pi_ = '"XI" + "TEST" + "RESETN" + "OLDI_VREF" + "PVT_VM_LO" + "PVT_VM_HI0" + "PVT_VM_HI1" + "PVT_VM_HI2"';
+  _po_ = '"XO"';
+}
+
+ScanStructures  {
+  ScanChain core_des__edt_int_slow__edt_MY_DES_edt_tessent_edt_core_inst__edt_block_channel1  {
+      ScanLength 234;
+      ScanInversion 0;
+      ScanIn "ETH_TXCLK";
+      ScanOut "ETH_RXD3";
+      ScanMasterClock "ETH_RXCLK";
+  }
+}
+
+PatternBurst scanpats {
+  PatList { scan_test; }
+}
+
+PatternExec {
+  Timing RETARGET_timing;
+  PatternBurst scanpats;
+}
+
+Pattern scan_test  {
+  Ann {* Pattern:0  Vector:0  TesterCycle:0 *}
+  W tset_gen_tp1;
+  V {  _bidi_=X1XX00XX000000X \r10 0  \r64 X 0100XX0000000 \r99 X ;
+       _pi_=01100000;
+       _po_=X;
+  }
+  Ann {* Pattern:0  Vector:1  TesterCycle:1 *}
+  V {  _bidi_=X1XX00XX000000X \r10 0  \r64 X 0100XX0000000 \r99 X ;
+       _pi_=01100000;
+       _po_=X;
+  }
+}

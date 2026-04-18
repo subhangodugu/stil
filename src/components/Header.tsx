@@ -6,10 +6,10 @@ import { motion } from 'framer-motion';
 import { cn } from '../lib/utils';
 import toast from 'react-hot-toast';
 
-export const Header: React.FC = () => {
+export const Header: React.FC<{ onStartStreaming?: (parsed: any, logMap?: any) => void }> = ({ onStartStreaming }) => {
   const { 
     setProjectData, setFailingFFs, setLoading, 
-    reset, loading, setViewMode, setDashboardChips
+    reset, loading, setViewMode, setDashboardChips, setStilText
   } = useStore();
   const navigate = useNavigate();
   const stilInputRef = useRef<HTMLInputElement>(null);
@@ -27,6 +27,10 @@ export const Header: React.FC = () => {
 
     const toastId = toast.loading("Executing Diagnostic Pipeline...");
     setLoading(true);
+
+    // Store raw STIL text so FaultInjectionPanel can use it without re-uploading
+    const stilRawText = await stilFile.text();
+    setStilText(stilRawText);
 
     const formData = new FormData();
     formData.append('stil', stilFile);
@@ -47,6 +51,11 @@ export const Header: React.FC = () => {
       setProjectData(data.projectData);
       setFailingFFs(data.failingFFs);
 
+      // Trigger Real-Time Streaming Diagnostic if supported
+      if (onStartStreaming) {
+        onStartStreaming(data.projectData, {});
+      }
+
       // Refresh dashboard data for unified connectivity
       const summaryResp = await fetch('/api/data/summary');
       if (summaryResp.ok) {
@@ -56,7 +65,6 @@ export const Header: React.FC = () => {
 
       toast.success("Pipeline Executed: Deterministic Faults Mapped", { id: toastId });
       navigate('/');
-      setViewMode('topology');
     } catch (err: any) {
       toast.error(`System Failure: ${err.message}`, { id: toastId });
       console.error(err);
@@ -161,16 +169,6 @@ export const Header: React.FC = () => {
       </div>
 
       <div className="flex items-center gap-3">
-        {/* Navigation Toggle - Hardened for fleet-only view */}
-        <div className="flex bg-slate-900/50 border border-slate-800 rounded-lg p-1 mr-4">
-          <button 
-            onClick={() => { navigate('/'); setViewMode('dashboard'); }}
-            className="px-6 py-1.5 rounded-md text-[10px] font-black uppercase text-cyan-400 bg-slate-800 shadow-sm transition-all"
-          >
-            Tester Dashboard
-          </button>
-        </div>
-
         <div className="flex items-center bg-slate-900/50 border border-slate-800 rounded-lg p-0.5">
           <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded-md cursor-pointer transition-all group">
             <FileText size={14} className="text-slate-500 group-hover:text-cyan-400" />

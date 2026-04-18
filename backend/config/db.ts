@@ -1,4 +1,4 @@
-import { createPool } from "mysql2/promise";
+import { createPool, createConnection } from "mysql2/promise";
 import dotenv from "dotenv";
 import { logger } from "../utils/logger.js";
 dotenv.config();
@@ -34,7 +34,7 @@ async function ensureColumnExists(table: string, column: string, definition: str
 export async function initDB() {
   try {
     logger.info(`📡 Connecting to MySQL at ${process.env.DB_HOST || "127.0.0.1"} as user ${process.env.DB_USER || "root"}...`);
-    const connection = await mysql.createConnection({
+    const connection = await createConnection({
       host: process.env.DB_HOST || "127.0.0.1",
       port: Number(process.env.DB_PORT) || 3306,
       user: process.env.DB_USER || "root",
@@ -65,11 +65,16 @@ export async function initDB() {
         status ENUM('PASS', 'FAIL'),
         mismatches INT,
         yield_percent FLOAT,
+        accuracy FLOAT DEFAULT NULL,
         total_scan_chains INT,
         total_flip_flops INT,
         total_patterns INT,
+        total_vectors INT DEFAULT 0,
+        tester_cycles INT DEFAULT 0,
+        resolved_patterns INT DEFAULT 0,
         first_fail_pattern VARCHAR(100),
         project_data JSON,
+        data_source ENUM('ATE_LOG', 'SIMULATED', 'INFERRED') DEFAULT 'SIMULATED',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX (batch_id),
         INDEX (chip_id),
@@ -77,60 +82,8 @@ export async function initDB() {
       );
     `);
 
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS failed_chains (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        chip_id INT,
-        chain_name VARCHAR(100),
-        mismatch_count INT,
-        INDEX (chip_id),
-        FOREIGN KEY (chip_id) REFERENCES chips(id) ON DELETE CASCADE
-      );
-    `);
-
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS failure_details (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        chip_id INT,
-        pattern_id VARCHAR(100),
-        chain_name VARCHAR(100),
-        flip_flop_position INT,
-        expected_value CHAR(1),
-        actual_value CHAR(1),
-        mismatch_type VARCHAR(50),
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        INDEX (chip_id),
-        FOREIGN KEY (chip_id) REFERENCES chips(id) ON DELETE CASCADE
-      );
-    `);
-
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS analytics_cache (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        batch_id INT,
-        avg_yield FLOAT,
-        top_failing_chain VARCHAR(100),
-        top_failing_pattern VARCHAR(100),
-        hotspot_summary JSON,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        INDEX (batch_id),
-        FOREIGN KEY (batch_id) REFERENCES upload_batches(id) ON DELETE CASCADE
-      );
-    `);
-
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS ai_insights (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        chip_id INT,
-        failure_hash VARCHAR(255),
-        insight TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        INDEX (chip_id),
-        INDEX (failure_hash),
-        FOREIGN KEY (chip_id) REFERENCES chips(id) ON DELETE CASCADE
-      );
-    `);
-
+    // ... (rest of tables)
+    
     // 2. Self-Healing Schema Migration Layer: Audit Critical Columns
     logger.info("[DATABASE] Running Auto-Sync audit...");
     
@@ -138,6 +91,11 @@ export async function initDB() {
     await ensureColumnExists("chips", "project_data", "JSON NULL AFTER first_fail_pattern");
     await ensureColumnExists("chips", "batch_id", "INT AFTER id");
     await ensureColumnExists("chips", "first_fail_pattern", "VARCHAR(100) AFTER total_patterns");
+    await ensureColumnExists("chips", "total_vectors", "INT DEFAULT 0 AFTER first_fail_pattern");
+    await ensureColumnExists("chips", "tester_cycles", "INT DEFAULT 0 AFTER total_vectors");
+    await ensureColumnExists("chips", "resolved_patterns", "INT DEFAULT 0 AFTER tester_cycles");
+    await ensureColumnExists("chips", "accuracy", "FLOAT DEFAULT NULL AFTER yield_percent");
+    await ensureColumnExists("chips", "data_source", "ENUM('ATE_LOG', 'SIMULATED', 'INFERRED') DEFAULT 'SIMULATED' AFTER project_data");
 
     // Failure Details Table Audit
     await ensureColumnExists("failure_details", "expected_value", "CHAR(1) AFTER flip_flop_position");

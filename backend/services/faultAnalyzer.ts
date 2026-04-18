@@ -7,7 +7,7 @@ export interface ClassifiedFault {
   flipFlopPosition: number;
   expected: string;
   actual: string;
-  faultType: "STUCK_AT_0" | "STUCK_AT_1" | "INTERMITTENT" | "UNKNOWN";
+  faultType: "STUCK_AT_0" | "STUCK_AT_1" | "INTERMITTENT" | "UNKNOWN" | "STUCK_AT_SIMULATED";
   mismatchType: string;
 }
 
@@ -18,6 +18,7 @@ export interface AnalysisResult {
   yieldPercent: number;
   firstFailPattern: string | null;
   failureDetails: ClassifiedFault[];
+  dataSource: "ATE_LOG" | "SIMULATED" | "INFERRED";
 }
 
 /**
@@ -72,6 +73,7 @@ export function analyzeFaults(parsedSTIL: STILUnified, logs: LogFailure[]): Anal
     failedChains,
     yieldPercent,
     firstFailPattern,
-    failureDetails
+    failureDetails,
+    dataSource: Array.isArray(logs) && logs.length > 0 ? "ATE_LOG" : "SIMULATED"
   };
 }

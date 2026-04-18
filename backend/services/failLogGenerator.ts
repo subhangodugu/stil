@@ -2,6 +2,13 @@ import { FaultSummary } from "./faultSummaryBuilder.js";
 import { FailEntry } from "./activationEngine.js";
 import { STILUnified } from "./stilParser.js";
 
+const FaultDisplayMap: Record<string, string> = {
+  'SA0': 'Stuck-at-L (Low)',
+  'SA1': 'Stuck-at-H (High)',
+  'STUCK_AT_0': 'Stuck-at-L (Low)',
+  'STUCK_AT_1': 'Stuck-at-H (High)'
+};
+
 export function generateFailLogText(
   summary: FaultSummary,
   entries: FailEntry[]
@@ -14,7 +21,7 @@ Generated From STIL Fault Injection Engine
 FAULT SUMMARY
 --------------------------------------------------------
 Fault ID            : ${summary.faultId}
-Fault Type          : ${summary.faultType}
+Fault Type          : ${FaultDisplayMap[summary.faultType] || summary.faultType}
 Affected Chain      : ${summary.affectedChain}
 Affected Shift Bit  : ${summary.affectedShiftBit}
 Total Patterns      : ${summary.totalPatterns}

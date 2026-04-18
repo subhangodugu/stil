@@ -1,7 +1,7 @@
 import React from 'react';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, 
-  Tooltip, ResponsiveContainer, Cell 
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, Cell
 } from 'recharts';
 import { Target } from 'lucide-react';
 
@@ -28,16 +28,16 @@ export const PatternWeaknessChart: React.FC<Props> = ({ patterns }) => {
           <BarChart data={patterns} layout="vertical">
             <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={false} />
             <XAxis type="number" hide />
-            <YAxis 
-              dataKey="patternId" 
-              type="category" 
-              stroke="#475569" 
-              fontSize={10} 
+            <YAxis
+              dataKey="patternId"
+              type="category"
+              stroke="#475569"
+              fontSize={10}
               width={70}
-              tickLine={false} 
+              tickLine={false}
               axisLine={false}
             />
-            <Tooltip 
+            <Tooltip
               cursor={{ fill: 'rgba(255,255,255,0.05)' }}
               contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
               itemStyle={{ color: '#f59e0b', fontWeight: 'bold' }}

@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { AlertTriangle, Hash, Zap, Target } from 'lucide-react';
+import { AlertTriangle, Hash, Zap, Target, Activity } from 'lucide-react';
 
 interface Props {
   chip: any;
@@ -35,15 +35,22 @@ export default function FailureSummaryCards({ chip, details, failedChains }: Pro
     },
     {
       label: 'Diagnostic Depth',
-      value: chip.total_flip_flops.toLocaleString(),
+      value: (chip.total_flip_flops ?? 0).toLocaleString(),
       sub: 'Total bits analyzed',
       icon: <Target className="text-blue-500" size={20} />,
       color: 'border-blue-500/20'
+    },
+    {
+      label: 'Vector Accuracy',
+      value: chip.accuracy != null ? `${Number(chip.accuracy).toFixed(2)}%` : 'N/A',
+      sub: chip.total_vectors > 0 ? `${chip.total_vectors.toLocaleString()} total vectors` : 'No vector data',
+      icon: <Activity className="text-indigo-400" size={20} />,
+      color: 'border-indigo-500/20'
     }
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
       {cards.map((card, idx) => (
         <motion.div
           key={idx}

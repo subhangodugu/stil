@@ -4,9 +4,18 @@ import { Sparkles, Loader2, AlertCircle, Clock, Database } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
 
+export interface ParsedInsight {
+  summary?: string;
+  rootCause?: string;
+  confidence?: number;
+  stilEvidence?: string;
+  recommendedAction?: string[];
+}
+
 export const AIInsightPanel: React.FC = () => {
   const { projectData, failingFFs, selectedChain } = useStore();
-  const [insight, setInsight] = useState<string | null>(null);
+  const [insightData, setInsightData] = useState<ParsedInsight | null>(null);
+  const [rawInsight, setRawInsight] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [metadata, setMetadata] = useState<{ source: string; generatedAt: string | null }>({ source: '', generatedAt: null });
 
@@ -36,7 +45,9 @@ export const AIInsightPanel: React.FC = () => {
         failingCount,
         totalFails,
         selectedChain: selectedChain?.name || 'Global',
-        failingFFs: Object.keys(failingFFs).slice(0, 50)
+        failingFFs: Object.keys(failingFFs).slice(0, 50),
+        rawStilSnippet: (projectData as any).rawStilSnippet,
+        rawLogSnippet: (projectData as any).rawLogSnippet
       };
 
       const response = await fetch("/api/ai/insight", {
@@ -51,14 +62,24 @@ export const AIInsightPanel: React.FC = () => {
       if (!response.ok) throw new Error("AI Engine unreachable");
 
       const result = await response.json();
-      setInsight(result.insight || "Unable to generate insight.");
+      
+      try {
+        const parsed = JSON.parse(result.insight);
+        setInsightData(parsed);
+        setRawInsight(null);
+      } catch (e) {
+        setRawInsight(result.insight || "Unable to parse AI Insight.");
+        setInsightData(null);
+      }
+      
       setMetadata({ 
         source: result.source, 
         generatedAt: result.generatedAt ? new Date(result.generatedAt).toLocaleString() : null 
       });
     } catch (error) {
       console.error("AI Insight Error:", error);
-      setInsight("Error generating AI insights. The diagnostic engine may be offline.");
+      setRawInsight("Error generating AI insights. The diagnostic engine may be offline.");
+      setInsightData(null);
     } finally {
       setLoading(false);
     }
@@ -94,18 +115,42 @@ export const AIInsightPanel: React.FC = () => {
               <Loader2 size={32} className="animate-spin text-cyan-500" />
               <p className="text-sm animate-pulse">Analyzing silicon failure patterns...</p>
             </motion.div>
-          ) : insight ? (
+          ) : insightData || rawInsight ? (
             <motion.div 
               key="content"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               className="space-y-6"
             >
-              <div className="prose prose-invert prose-sm max-w-none">
-                <div className="whitespace-pre-wrap text-slate-300 leading-relaxed">
-                  {insight}
+              {insightData ? (
+                 <div className="space-y-4">
+                    <div className="p-4 bg-slate-800/40 rounded-lg border border-slate-700">
+                       <h4 className="text-cyan-400 font-medium mb-1">Root Cause Diagnosis (Conf: {insightData.confidence || 0}%)</h4>
+                       <p className="text-slate-200 text-sm font-semibold">{insightData.rootCause}</p>
+                       <p className="text-slate-400 text-xs mt-2">{insightData.summary}</p>
+                    </div>
+                    {insightData.stilEvidence && (
+                       <div className="p-4 bg-slate-950 rounded-lg border border-slate-800 font-mono text-xs overflow-x-auto text-emerald-400 custom-scrollbar">
+                          <div className="text-slate-500 mb-2 uppercase tracking-widest text-[10px] font-sans font-bold">Context Evidence</div>
+                          <pre className="whitespace-pre-wrap break-all">{insightData.stilEvidence}</pre>
+                       </div>
+                    )}
+                    {insightData.recommendedAction && insightData.recommendedAction.length > 0 && (
+                       <div className="p-4 bg-slate-800/40 rounded-lg border border-slate-700">
+                          <h4 className="text-cyan-400 text-sm font-medium mb-2">Recommended FA Action</h4>
+                          <ul className="list-disc list-inside text-xs text-slate-300 space-y-1">
+                             {insightData.recommendedAction.map((act, i) => <li key={i}>{act}</li>)}
+                          </ul>
+                       </div>
+                    )}
+                 </div>
+              ) : (
+                <div className="prose prose-invert prose-sm max-w-none">
+                  <div className="whitespace-pre-wrap text-slate-300 leading-relaxed">
+                    {rawInsight}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Metadata Footer */}
               <div className="pt-4 border-t border-slate-800/50 flex items-center justify-between text-[10px] uppercase tracking-widest font-bold">

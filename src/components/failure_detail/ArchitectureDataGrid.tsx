@@ -1,5 +1,5 @@
 import React from 'react';
-import { Database, Zap, Cpu, Layers, ListOrdered, Share2 } from 'lucide-react';
+import { Database, Zap, Cpu, Layers, ListOrdered, Share2, ShieldCheck, Activity, FileCode } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 
 export default function ArchitectureDataGrid() {
@@ -9,9 +9,24 @@ export default function ArchitectureDataGrid() {
 
   const stats = [
     { 
-      label: "Total Patterns", 
-      value: projectData.totalPatterns?.toLocaleString() || "0", 
+      label: "Executed Patterns", 
+      value: projectData.totalPatterns?.toLocaleString() || projectData.patternCount?.toLocaleString() || "0", 
       icon: <Layers size={14} className="text-cyan-400" /> 
+    },
+    { 
+      label: "Total Vectors", 
+      value: projectData.vectorCount?.toLocaleString() || projectData.debugReport?.scanVectorsExtracted?.toLocaleString() || "0", 
+      icon: <Activity size={14} className="text-indigo-400" /> 
+    },
+    { 
+      label: "Tester Cycles", 
+      value: projectData.testerCycles?.toLocaleString() || "0", 
+      icon: <ListOrdered size={14} className="text-rose-400" /> 
+    },
+    { 
+      label: "STIL Mapping", 
+      value: projectData.debugReport?.pinDetectionMode?.toUpperCase() || "HEURISTIC", 
+      icon: <ShieldCheck size={14} className="text-emerald-400" /> 
     },
     { 
       label: "Test Type", 
@@ -22,13 +37,6 @@ export default function ArchitectureDataGrid() {
       label: "Total Scan Chains", 
       value: projectData.scanChains?.length.toString() || "0", 
       icon: <Share2 size={14} className="text-purple-400" /> 
-    },
-    { 
-      label: "Scan Length (Avg)", 
-      value: projectData.scanChains?.length > 0 
-        ? `${Math.floor(projectData.totalFFs / projectData.scanChains.length)} Bits` 
-        : "N/A", 
-      icon: <ListOrdered size={14} className="text-emerald-400" /> 
     },
     { 
       label: "Total Scan FFs", 
@@ -69,6 +77,24 @@ export default function ArchitectureDataGrid() {
           </div>
         ))}
       </div>
+
+      {projectData.debugReport?.executionGraph && projectData.debugReport.executionGraph.length > 0 && (
+        <div className="border-t border-slate-800/50 bg-slate-900/10 p-4">
+           <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2 mb-3">
+             <FileCode size={12} /> Resolved Test Patterns
+           </h4>
+           <div className="flex flex-wrap gap-2">
+             {projectData.debugReport.executionGraph.map((item: string, idx: number) => {
+               const name = item.split(': ')[1] || item;
+               return (
+                 <span key={idx} className="bg-slate-950/80 border border-slate-700/50 px-2 py-1 rounded text-[10px] font-mono text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.05)]">
+                   {name}
+                 </span>
+               );
+             })}
+           </div>
+        </div>
+      )}
     </div>
   );
 }

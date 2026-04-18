@@ -12,7 +12,12 @@ interface DatabaseChip {
   total_scan_chains: number;
   total_flip_flops: number;
   total_patterns: number;
+  total_vectors: number;
+  tester_cycles: number;
+  resolved_patterns: number;
   first_fail_pattern: string | null;
+  project_data: any;
+  data_source: string;
   created_at: string;
   batch_name: string;
   upload_timestamp: string;
@@ -30,8 +35,10 @@ export const chipController = {
       const [chips] = await db.query(`
         SELECT 
           c.id, c.batch_id, c.chip_id, c.status, c.mismatches, 
-          c.yield_percent, c.total_scan_chains, c.total_flip_flops, 
-          c.total_patterns, c.first_fail_pattern, c.created_at,
+          COALESCE(c.yield_percent, 100.0) as yield_percent, 
+          COALESCE(c.accuracy, 100.0) as accuracy,
+          c.total_scan_chains, c.total_flip_flops, 
+          c.total_patterns, c.total_vectors, c.tester_cycles, c.resolved_patterns, c.first_fail_pattern, c.data_source, c.created_at,
           b.batch_name, b.upload_timestamp 
         FROM chips c 
         JOIN upload_batches b ON c.batch_id = b.id 
@@ -57,14 +64,20 @@ export const chipController = {
   getFailureDetails: async (req: Request, res: Response) => {
     try {
       const { chipId } = req.params;
-      const [chips] = await db.query("SELECT * FROM chips WHERE id = ?", [chipId]);
+      const [chips] = await db.query(
+        `SELECT c.*, b.batch_name, b.upload_timestamp
+         FROM chips c
+         LEFT JOIN upload_batches b ON c.batch_id = b.id
+         WHERE c.id = ?`,
+        [chipId]
+      );
       if ((chips as DatabaseChip[]).length === 0) {
         return res.status(404).json({ error: "Chip not found" });
       }
       const chip = (chips as DatabaseChip[])[0];
 
-      const [details] = await db.query("SELECT * FROM failure_details WHERE chip_id = ?", [chipId]);
-      const [chains] = await db.query("SELECT * FROM failed_chains WHERE chip_id = ?", [chipId]);
+      const [details] = await db.query("SELECT * FROM failure_details WHERE chip_id = ? ORDER BY id ASC", [chipId]);
+      const [chains] = await db.query("SELECT * FROM failed_chains WHERE chip_id = ? ORDER BY mismatch_count DESC", [chipId]);
 
       return res.json({
         chip,

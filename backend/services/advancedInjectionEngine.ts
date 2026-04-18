@@ -1,4 +1,4 @@
-import { parseSTIL } from "./stilParser.js";
+import { parseSTIL, STILUnified } from "./stilParser.js";
 import { runActivationEngine } from "./activationEngine.js";
 import { buildFaultSummary } from "./faultSummaryBuilder.js";
 import { generateFailLogText, generateFailLogJson } from "./failLogGenerator.js";
@@ -53,6 +53,52 @@ export function runAdvancedInjection(
     activationResult.failEntries,
     activationResult.heatMap
   );
+
+  return {
+    logText,
+    jsonOutput,
+    summary: {
+      totalFails: activationResult.stats.failed,
+      affectedPatterns: [...new Set(activationResult.failEntries.map(e => e.pattern))],
+      targets: params.targets,
+      failHeatMapData: activationResult.heatMap
+    }
+  };
+}
+
+/**
+ * Runs the injection engine directly from a pre-parsed STILUnified JSON object
+ * (stored as project_data in the DB). Skips STIL parsing entirely.
+ */
+export function runAdvancedInjectionFromProjectData(
+  stilMetadata: STILUnified,
+  params: {
+    targets: Array<{ chainName: string; bitPosition: number; faultType: 'SA0' | 'SA1' }>;
+    severity: number;
+    clusterSize: number;
+    intermittentProb?: number;
+  }
+) {
+  // Expand targets based on clusterSize
+  const expandedTargets: Array<{ chainName: string; bitPosition: number; faultType: 'SA0' | 'SA1' }> = [];
+  params.targets.forEach(t => {
+    if (!t.chainName) return;
+    const chainLen = stilMetadata.scanLengthPerChain[t.chainName];
+    if (chainLen == null) {
+      throw new Error(`Critical Simulation Error: Specified scan chain "${t.chainName}" does not exist in the design.`);
+    }
+    for (let i = 0; i < params.clusterSize; i++) {
+      const bit = t.bitPosition + i;
+      if (bit < chainLen) {
+        expandedTargets.push({ chainName: t.chainName, bitPosition: bit, faultType: t.faultType });
+      }
+    }
+  });
+
+  const activationResult = runActivationEngine(stilMetadata, { ...params, targets: expandedTargets });
+  const faultSummary = buildFaultSummary(stilMetadata, params, activationResult.stats);
+  const logText = generateFailLogText(faultSummary, activationResult.failEntries);
+  const jsonOutput = generateFailLogJson(faultSummary, stilMetadata, activationResult.failEntries, activationResult.heatMap);
 
   return {
     logText,

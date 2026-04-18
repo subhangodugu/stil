@@ -3,6 +3,7 @@ import { useStore } from '../store/useStore';
 import { Zap, Download, RefreshCw, AlertCircle, FileText } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { cn } from '../lib/utils';
+import { getFaultDisplay } from '../lib/faultTerminology';
 
 export const FaultInjectionPanel: React.FC = () => {
   const { 
@@ -54,8 +55,8 @@ export const FaultInjectionPanel: React.FC = () => {
       return;
     }
 
-    if (!stilText) {
-      setError("STIL data missing. Please re-upload your STIL file.");
+    if (!stilText && !projectData) {
+      setError("No design data available. Please upload a STIL file.");
       return;
     }
 
@@ -64,30 +65,46 @@ export const FaultInjectionPanel: React.FC = () => {
       setFailingFFs({});
       setProjectData({ ...projectData, faults: [] });
 
-      const formData = new FormData();
-      const blob = new Blob([stilText], { type: 'text/plain' });
-      formData.append('stil', blob, 'design.stil');
-      formData.append('params', JSON.stringify({
-        targets: injectionTargets,
-        severity,
-        clusterSize,
-      }));
+      let injectResponse: Response;
 
-      const response = await fetch('/api/uploads/inject-fault', {
-        method: 'POST',
-        body: formData,
-      });
+      if (stilText) {
+        // --- Mode B: send raw STIL file (normal upload flow) ---
+        const formData = new FormData();
+        const blob = new Blob([stilText], { type: 'text/plain' });
+        formData.append('stil', blob, 'design.stil');
+        formData.append('params', JSON.stringify({
+          targets: injectionTargets,
+          severity,
+          clusterSize,
+        }));
+        injectResponse = await fetch('/api/uploads/inject-fault', { method: 'POST', body: formData });
+      } else {
+        // --- Mode A: send pre-parsed projectData JSON (drill-down view, no STIL file) ---
+        const formData = new FormData();
+        formData.append('projectDataJson', JSON.stringify(projectData));
+        formData.append('params', JSON.stringify({
+          targets: injectionTargets,
+          severity,
+          clusterSize,
+        }));
+        injectResponse = await fetch('/api/uploads/inject-fault', { method: 'POST', body: formData });
+      }
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+      if (!injectResponse.ok) {
+        const errorData = await injectResponse.json().catch(() => ({}));
         throw new Error(errorData.error || "Failed to inject fault");
       }
 
-      const result = await response.json();
+      const result = await injectResponse.json();
       setGeneratedResults(result.logText, result.jsonOutput ?? null);
       
+      // Now analyze the synthetic log to update topology
       const analyzeFormData = new FormData();
-      analyzeFormData.append('stil', blob, 'design.stil');
+      // Provide a minimal STIL blob for the analyze step
+      const stilBlob = stilText
+        ? new Blob([stilText], { type: 'text/plain' })
+        : new Blob([`// synthetic\n`], { type: 'text/plain' });
+      analyzeFormData.append('stil', stilBlob, 'design.stil');
       const logBlob = new Blob([result.logText], { type: 'text/plain' });
       analyzeFormData.append('failLog', logBlob, 'synthetic_fail.log');
 
@@ -104,7 +121,7 @@ export const FaultInjectionPanel: React.FC = () => {
       setViewMode('topology');
     } catch (err) {
       console.error(err);
-      setError("Error during fault injection simulation.");
+      setError(err instanceof Error ? err.message : "Error during fault injection simulation.");
     } finally {
       setLoading(false);
     }
@@ -181,7 +198,7 @@ export const FaultInjectionPanel: React.FC = () => {
                   faultType === 'SA0' ? "bg-amber-500 border-amber-400 text-slate-950 shadow-lg shadow-amber-500/20" : "bg-slate-950 border-slate-700 text-slate-500 hover:border-slate-600"
                 )}
               >
-                Stuck-at-0
+                {getFaultDisplay('SA0').long}
               </button>
               <button 
                 onClick={() => setFaultType('SA1')}
@@ -190,7 +207,7 @@ export const FaultInjectionPanel: React.FC = () => {
                   faultType === 'SA1' ? "bg-amber-500 border-amber-400 text-slate-950 shadow-lg shadow-amber-500/20" : "bg-slate-950 border-slate-700 text-slate-500 hover:border-slate-600"
                 )}
               >
-                Stuck-at-1
+                {getFaultDisplay('SA1').long}
               </button>
             </div>
           </div>

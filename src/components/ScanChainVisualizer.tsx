@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { useStore, ScanChain } from '../store/useStore';
 import { motion } from 'framer-motion';
 import { cn } from '../lib/utils';
+import { getFaultDisplay } from '../lib/faultTerminology';
 
 const FF_SIZE = 55;
 const SPACING = 25;
@@ -173,7 +174,7 @@ export const ScanChainVisualizer: React.FC<ScanChainVisualizerProps> = ({ chain 
               >
                 {i}
               </text>
-              <title>{`FF: ${ff.id}\nGlobal Index: ${ff.globalIndex}\nFails: ${failCount}`}</title>
+              <title>{`FF: ${ff.id}\nGlobal Index: ${ff.globalIndex}\nFails: ${failCount}${isTarget ? `\nFault Target: ${getFaultDisplay(target.faultType).long}` : ''}`}</title>
             </motion.g>
           );
         })}

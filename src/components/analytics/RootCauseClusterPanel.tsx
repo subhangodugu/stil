@@ -7,6 +7,8 @@ interface Props {
 }
 
 export const RootCauseClusterPanel: React.FC<Props> = ({ clusters }) => {
+  const totalChips = clusters.reduce((sum, c) => sum + (c.chipCount || 0), 0);
+
   return (
     <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800 rounded-2xl p-6 h-full flex flex-col">
       <div className="mb-6 flex justify-between items-start">
@@ -53,7 +55,8 @@ export const RootCauseClusterPanel: React.FC<Props> = ({ clusters }) => {
 
               <div className="flex items-center justify-between pt-3 border-t border-slate-800/50">
                 <span className="text-[10px] text-cyan-400 font-black flex items-center gap-1">
-                  <ShieldCheck size={10} /> 94% Correlation
+                  <ShieldCheck size={10} />
+                  {totalChips > 0 ? `${((cluster.chipCount / totalChips) * 100).toFixed(0)}% of Fleet` : 'Isolated'}
                 </span>
                 <ChevronRight size={14} className="text-slate-600 group-hover:text-white transition-colors" />
               </div>

@@ -72,23 +72,6 @@ export default function TesterDashboard() {
       </div>
 
       <ChipGrid chips={dashboardChips} onChipClick={handleChipClick} onRefresh={fetchSummary} />
-      
-      {/* Historical Context Decoration */}
-      <div className="pt-10 border-t border-slate-800/50 flex justify-between items-center">
-        <div className="flex items-center gap-4">
-          <div className="flex -space-x-2">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="w-8 h-8 rounded-full border-2 border-[#0a0f18] bg-slate-800 flex items-center justify-center">
-                <Terminal size={12} className="text-slate-500" />
-              </div>
-            ))}
-          </div>
-          <span className="text-xs text-slate-600 font-medium">Enterprise persistence: MySQL @localhost:3306</span>
-        </div>
-        <div className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">
-          Build 1.0.0-PHASE-1
-        </div>
-      </div>
     </motion.div>
   );
 }

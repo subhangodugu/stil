@@ -25,6 +25,7 @@
     "dotenv": "^17.4.2",
     "express": "^4.21.2",
     "framer-motion": "^12.38.0",
+    "groq-sdk": "^1.1.2",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "multer": "^1.4.5-lts.1",
@@ -37,6 +38,7 @@
     "recharts": "^3.8.1",
     "tailwind-merge": "^3.5.0",
     "tsx": "^4.21.0",
+    "ws": "^8.20.0",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
@@ -44,6 +46,7 @@
     "@types/node": "^22.14.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.58.2",
     "@typescript-eslint/parser": "^8.58.2",
     "@vitejs/plugin-react": "^5.0.4",

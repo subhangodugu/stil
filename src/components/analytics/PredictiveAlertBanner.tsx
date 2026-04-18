@@ -41,10 +41,6 @@ export const PredictiveAlertBanner: React.FC<Props> = ({ alerts }) => {
               </div>
 
               <div className="flex items-center gap-6">
-                <div className="hidden md:flex flex-col text-right">
-                  <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest leading-none">Confidence</span>
-                  <span className="text-xs font-black text-red-500">92.4%</span>
-                </div>
                 <button className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-400 transition-all shadow-lg shadow-red-900/20">
                   Execute Audit <ChevronRight size={12} />
                 </button>

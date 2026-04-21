@@ -11,7 +11,26 @@ import { useStore } from '../store/useStore.js';
  */
 export function LiveDiagnosticOverlay() {
   const { streamingMetrics } = useStore();
-  const { isStreaming, currentCycle, currentPattern, mismatchCount } = streamingMetrics;
+  const { isStreaming } = streamingMetrics;
+  
+  // Industrial UI Throttling: Decouple visual state from high-frequency store updates
+  const [visualMetrics, setVisualMetrics] = React.useState(streamingMetrics);
+  const lastUpdate = React.useRef(0);
+
+  React.useEffect(() => {
+    if (!isStreaming) {
+      setVisualMetrics(streamingMetrics);
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastUpdate.current > 100) { // 10Hz UI Refresh is plenty for human eyes
+      setVisualMetrics(streamingMetrics);
+      lastUpdate.current = now;
+    }
+  }, [streamingMetrics, isStreaming]);
+
+  const { currentCycle, currentPattern, currentPatternIndex, totalPatterns, mismatchCount } = visualMetrics;
 
   return (
     <AnimatePresence>
@@ -49,6 +68,11 @@ export function LiveDiagnosticOverlay() {
                   <div className="space-y-1">
                     <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Active Pattern</p>
                     <p className="text-lg font-black text-white truncate max-w-[120px]">{currentPattern}</p>
+                    {totalPatterns > 0 && (
+                       <p className="text-[10px] font-bold text-slate-500">
+                         {currentPatternIndex} of {totalPatterns}
+                       </p>
+                    )}
                   </div>
                   
                   <div className="space-y-1">

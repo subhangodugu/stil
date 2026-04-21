@@ -7,7 +7,7 @@ export interface FailEntry {
   expected: number;
   actual: number;
   cycle: number;
-  faultType: 'SA0' | 'SA1';
+  faultType: 'SA0' | 'SA1' | 'INTERMITTENT';
   edtCh?: string;
   result: "FAIL";
 }
@@ -67,7 +67,7 @@ export function runActivationEngine(
         let actualValue = stuckValue;
         const INTERMITTENT_PERIOD = 4;
         
-        if (faultType as string === 'INTERMITTENT') {
+        if (faultType === ('INTERMITTENT' as any)) {
           actualValue = (vec.cycle % INTERMITTENT_PERIOD === 0) ? (expectedBit ^ 1) : expectedBit;
         }
 

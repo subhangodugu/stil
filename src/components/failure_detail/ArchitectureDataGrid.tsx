@@ -24,13 +24,23 @@ export default function ArchitectureDataGrid() {
       icon: <ListOrdered size={14} className="text-rose-400" /> 
     },
     { 
-      label: "STIL Mapping", 
-      value: projectData.debugReport?.pinDetectionMode?.toUpperCase() || "HEURISTIC", 
+      label: "Scan Clock", 
+      value: projectData.scanClock || "Default", 
+      icon: <Zap size={14} className="text-amber-400" /> 
+    },
+    { 
+      label: "Timing Set", 
+      value: projectData.timingSetName || "Standard", 
+      icon: <Cpu size={14} className="text-slate-400" /> 
+    },
+    { 
+      label: "Compression", 
+      value: projectData.compressionType || "None", 
       icon: <ShieldCheck size={14} className="text-emerald-400" /> 
     },
     { 
-      label: "Test Type", 
-      value: projectData.hasEDT ? "EDT / Production SCAN" : "Generic Serial SCAN", 
+      label: "EDT Macros", 
+      value: Object.keys(projectData.macros || {}).length.toString(), 
       icon: <Database size={14} className="text-blue-400" /> 
     },
     { 
@@ -42,16 +52,6 @@ export default function ArchitectureDataGrid() {
       label: "Total Scan FFs", 
       value: projectData.totalFFs?.toLocaleString() || "0", 
       icon: <Cpu size={14} className="text-amber-400" /> 
-    },
-    { 
-      label: "Series Connected", 
-      value: projectData.hasEDT ? "De-Compressed" : "YES", 
-      icon: <Zap size={14} className="text-orange-400" /> 
-    },
-    { 
-      label: "Parallel Connected", 
-      value: projectData.hasEDT ? "YES (EDT Logic)" : "NO", 
-      icon: <Zap size={14} className="text-cyan-400" /> 
     },
   ];
 
@@ -87,9 +87,13 @@ export default function ArchitectureDataGrid() {
              {projectData.debugReport.executionGraph.map((item: string, idx: number) => {
                const name = item.split(': ')[1] || item;
                return (
-                 <span key={idx} className="bg-slate-950/80 border border-slate-700/50 px-2 py-1 rounded text-[10px] font-mono text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.05)]">
+                 <button 
+                   key={idx} 
+                   title={`Pattern ID: ${name}`}
+                   className="bg-slate-950/80 border border-slate-700/50 px-2 py-1 rounded text-[10px] font-mono text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.05)] hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all cursor-help active:scale-95"
+                 >
                    {name}
-                 </span>
+                 </button>
                );
              })}
            </div>

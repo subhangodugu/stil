@@ -1,126 +1,47 @@
 import { Request, Response } from "express";
-import { db } from "../config/db.js";
-import { logger } from "../utils/logger.js";
+import { db, query } from "../config/db.js";
+import { asyncHandler } from "../utils/AsyncHandler.js";
 
-interface DatabaseChip {
-  id: number;
-  batch_id: number;
-  chip_id: string;
-  status: string;
-  mismatches: number;
-  yield_percent: number;
-  total_scan_chains: number;
-  total_flip_flops: number;
-  total_patterns: number;
-  total_vectors: number;
-  tester_cycles: number;
-  resolved_patterns: number;
-  first_fail_pattern: string | null;
-  project_data: any;
-  data_source: string;
-  created_at: string;
-  batch_name: string;
-  upload_timestamp: string;
-}
-
-interface FailedChain {
-  chip_id: number;
-  chain_name: string;
-  mismatch_count: number;
-}
+interface DatabaseChip { id: number; chip_id: string; status: string; mismatches: number; yield_percent: number; created_at: string; batch_name: string; project_data: any; data_source: string; }
+interface FailedChain { chip_id: number; chain_name: string; mismatch_count: number; }
 
 export const chipController = {
-  getSummary: async (req: Request, res: Response) => {
-    try {
-      const [chips] = await db.query(`
-        SELECT 
-          c.id, c.batch_id, c.chip_id, c.status, c.mismatches, 
-          COALESCE(c.yield_percent, 100.0) as yield_percent, 
-          COALESCE(c.accuracy, 100.0) as accuracy,
-          c.total_scan_chains, c.total_flip_flops, 
-          c.total_patterns, c.total_vectors, c.tester_cycles, c.resolved_patterns, c.first_fail_pattern, c.data_source, c.created_at,
-          b.batch_name, b.upload_timestamp 
-        FROM chips c 
-        JOIN upload_batches b ON c.batch_id = b.id 
-        ORDER BY b.upload_timestamp DESC, c.id DESC
-      `);
-      
-      const [failedChains] = await db.query("SELECT * FROM failed_chains");
-      
-      const result = (chips as DatabaseChip[]).map(chip => ({
-        ...chip,
-        failedChains: (failedChains as FailedChain[])
-          .filter(fc => fc.chip_id === chip.id)
-          .map(fc => fc.chain_name)
-      }));
+  getSummary: asyncHandler(async (req, res) => {
+    const chips = await query<DatabaseChip>(`
+      SELECT c.id, c.chip_id, c.status, c.mismatches, c.yield_percent, c.accuracy, 
+             c.total_patterns, c.total_vectors, c.tester_cycles, c.created_at, c.data_source, 
+             b.batch_name, b.upload_timestamp 
+      FROM chips c JOIN upload_batches b ON c.batch_id = b.id 
+      ORDER BY b.id DESC`);
+    
+    const chains = await query<FailedChain>("SELECT * FROM failed_chains");
+    
+    return res.json(chips.map(chip => ({
+      ...chip,
+      failedChains: chains.filter(fc => fc.chip_id === chip.id).map(fc => fc.chain_name)
+    })));
+  }),
 
-      return res.json(result);
-    } catch (error) {
-      logger.error("Summary fetch error:", error);
-      return res.status(500).json({ error: "Failed to fetch summary" });
-    }
-  },
+  getFailureDetails: asyncHandler(async (req, res) => {
+    const [chip] = await query<DatabaseChip>("SELECT c.*, b.batch_name FROM chips c LEFT JOIN upload_batches b ON c.batch_id = b.id WHERE c.id = ?", [req.params.chipId]);
+    if (!chip) return res.status(404).json({ error: "Chip not found" });
 
-  getFailureDetails: async (req: Request, res: Response) => {
-    try {
-      const { chipId } = req.params;
-      const [chips] = await db.query(
-        `SELECT c.*, b.batch_name, b.upload_timestamp
-         FROM chips c
-         LEFT JOIN upload_batches b ON c.batch_id = b.id
-         WHERE c.id = ?`,
-        [chipId]
-      );
-      if ((chips as DatabaseChip[]).length === 0) {
-        return res.status(404).json({ error: "Chip not found" });
-      }
-      const chip = (chips as DatabaseChip[])[0];
+    const details = await query("SELECT * FROM failure_details WHERE chip_id = ? ORDER BY id ASC", [chip.id]);
+    const chains = await query("SELECT * FROM failed_chains WHERE chip_id = ? ORDER BY mismatch_count DESC", [chip.id]);
 
-      const [details] = await db.query("SELECT * FROM failure_details WHERE chip_id = ? ORDER BY id ASC", [chipId]);
-      const [chains] = await db.query("SELECT * FROM failed_chains WHERE chip_id = ? ORDER BY mismatch_count DESC", [chipId]);
+    return res.json({ chip, failedChains: chains, failureDetails: details });
+  }),
 
-      return res.json({
-        chip,
-        failedChains: chains,
-        failureDetails: details
-      });
-    } catch (error) {
-      logger.error("Failure details fetch error:", error);
-      return res.status(500).json({ error: "Failed to fetch failure details" });
-    }
-  },
+  getBatches: asyncHandler(async (req, res) => res.json(await query("SELECT * FROM upload_batches ORDER BY id DESC"))),
 
-  getBatches: async (req: Request, res: Response) => {
-    try {
-      const [batches] = await db.query("SELECT * FROM upload_batches ORDER BY upload_timestamp DESC");
-      return res.json(batches);
-    } catch {
-      return res.status(500).json({ error: "Failed to fetch batches" });
-    }
-  },
-
-  deleteChip: async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      await db.query("DELETE FROM chips WHERE id = ?", [id]);
-      return res.json({ success: true, message: "Record purged successfully" });
-    } catch {
-      logger.error("Deletion failed");
-      return res.status(500).json({ error: "Failed to delete diagnostic record" });
-    }
-  },
+  deleteChip: asyncHandler(async (req, res) => {
+    await db.query("DELETE FROM chips WHERE id = ?", [req.params.id]);
+    return res.json({ success: true, message: "Record purged successfully" });
+  }),
  
-  resetAll: async (req: Request, res: Response) => {
-    try {
-      await db.query("DELETE FROM failure_details");
-      await db.query("DELETE FROM failed_chains");
-      await db.query("DELETE FROM analytics_cache");
-      await db.query("DELETE FROM chips");
-      await db.query("DELETE FROM upload_batches");
-      return res.json({ success: true, message: "All diagnostic data cleared" });
-    } catch {
-      logger.error("Global reset failed");
-      return res.status(500).json({ error: "Failed to clear records" });
-    }
-  }
+  resetAll: asyncHandler(async (req, res) => {
+    const tables = ["failure_details", "failed_chains", "analytics_cache", "chips", "upload_batches"];
+    for (const table of tables) await db.query(`DELETE FROM ${table}`);
+    return res.json({ success: true, message: "All diagnostic data cleared" });
+  })
 };

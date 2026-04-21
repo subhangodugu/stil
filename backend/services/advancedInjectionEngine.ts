@@ -2,6 +2,7 @@ import { parseSTIL, STILUnified } from "./stilParser.js";
 import { runActivationEngine } from "./activationEngine.js";
 import { buildFaultSummary } from "./faultSummaryBuilder.js";
 import { generateFailLogText, generateFailLogJson } from "./failLogGenerator.js";
+import { IndustrialError } from "../utils/IndustrialError.js";
 
 /**
  * Industrial Advanced Injection Engine.
@@ -18,6 +19,10 @@ export function runAdvancedInjection(
 ) {
   // Step 1: Parse STIL (Unified Lexical Scanner)
   const stilMetadata = parseSTIL(stilText);
+
+  if (!stilMetadata.patterns || stilMetadata.patterns.length === 0) {
+    throw new IndustrialError("SIMULATION_DATA_MISSING", "Critical Simulation Failure: STIL design contains no vector blocks for fault activation.", 422);
+  }
 
   // Step 2: Expand targets based on clusterSize
   const expandedTargets: Array<{ chainName: string; bitPosition: number; faultType: 'SA0' | 'SA1' }> = [];
@@ -79,6 +84,10 @@ export function runAdvancedInjectionFromProjectData(
     intermittentProb?: number;
   }
 ) {
+  if (!stilMetadata.patterns || stilMetadata.patterns.length === 0) {
+    throw new IndustrialError("SIMULATION_DATA_MISSING", "Industrial Error: High-fidelity simulation requires the original STIL pattern bitstream which is missing from this chip record.", 422);
+  }
+
   // Expand targets based on clusterSize
   const expandedTargets: Array<{ chainName: string; bitPosition: number; faultType: 'SA0' | 'SA1' }> = [];
   params.targets.forEach(t => {

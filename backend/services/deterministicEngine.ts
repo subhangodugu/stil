@@ -9,6 +9,8 @@ import { PatternData } from "./stilParser.js";
 
 export interface DeterministicResult {
   patternId: string;
+  patternIndex: number;
+  totalPatterns: number;
   cycle: number;
   expected: string;
   actual: string;
@@ -36,28 +38,25 @@ export function compareScanBits(expected: string, actual: string): boolean {
  * Here, we simulate the "Actual" hardware response.
  */
 /**
- * Industrial DUT Simulation (v5.0 - Design-Intent Logic)
+ * Industrial DUT Simulation (v5.1 - Design-Intent Logic)
  * 
- * Unlike v4, this version performs Logic-Verification. 
- * If a bit is logical 'X' (Don't Care) in the Design Model, 
- * the hardware response is stochastic. This forces a FAIL if the user
- * modified the STIL to expect a logic level where none is justified.
+ * Performs Logic-Verification against the hardware model.
+ * If a bit is logical 'X' (Don't Care) in the STIL source, the hardware response
+ * is treated as unstable/uninitialized. This ensures that any user-side
+ * re-classification of 'X' to a fixed logic level ('1'/'0') results in a
+ * deterministic mismatch, preventing forged diagnostic passes.
  */
-function simulateActualResponse(v: any, bitIndex: number): string {
+function simulateActualResponse(v: { cycle: number; scan: string }, bitIndex: number): string {
   const rawValue = v.scan[bitIndex];
   
-  // 1. STIL Mask Detection: If the bit is masked ('X'), it's uninitialized in silicon.
-  // We simulate a floating state (randomized) to trigger mismatches against forged expectations.
   if (rawValue === 'X' || rawValue === 'x' || rawValue === '?') {
-    // Deterministic noise ensuring '1' and '0' alternate to trigger failures
+    // Industrial noise generation: ensures that 'X' bits are never stable '1' or '0'.
     return ((v.cycle + bitIndex) % 2 === 0) ? '0' : '1';
   }
 
-  // 2. Logic Force Detection: Validate if the forced level is physically possible.
-  // (In a full simulator, we would check PI/PO logical dependency here).
-  // For v5.0 PH3, we assume bits that don't transition are potential candidates for floating.
-  
-  return rawValue === '1' ? '1' : '0';
+  // Preserve 'Z' (High Impedance) for downstream forensic analysis if needed,
+  // though compareScanBits currently treats it as a 'pass' during logic checks.
+  return rawValue;
 }
 
 /**
@@ -91,6 +90,8 @@ export async function* streamDeterministicSimulation(
 
         yield {
           patternId: pattern.patternId,
+          patternIndex: patternIdx + 1,
+          totalPatterns: patterns.length,
           cycle: v.cycle,
           expected,
           actual,

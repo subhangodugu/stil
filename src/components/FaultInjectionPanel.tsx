@@ -1,16 +1,22 @@
 import React, { useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import { Zap, Download, RefreshCw, AlertCircle, FileText } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { cn } from '../lib/utils';
 import { getFaultDisplay } from '../lib/faultTerminology';
 
-export const FaultInjectionPanel: React.FC = () => {
+interface FaultInjectionPanelProps {
+  onResult?: (chip: any, failedChains: any[], failureDetails: any[]) => void;
+}
+
+export const FaultInjectionPanel: React.FC<FaultInjectionPanelProps> = ({ onResult }) => {
   const { 
     projectData, stilText, setFailingFFs, setProjectData, setError, 
     injectionTargets, setInjectionTargets, setSelectedChain, setViewMode,
     generatedLog, generatedJsonOutput, setGeneratedResults 
   } = useStore();
+  const { chipId } = useParams<{ chipId: string }>();
   
   const lastTarget = injectionTargets[injectionTargets.length - 1];
   const selectedChain = lastTarget?.chainName ?? '';
@@ -79,9 +85,11 @@ export const FaultInjectionPanel: React.FC = () => {
         }));
         injectResponse = await fetch('/api/uploads/inject-fault', { method: 'POST', body: formData });
       } else {
-        // --- Mode A: send pre-parsed projectData JSON (drill-down view, no STIL file) ---
+        // --- Mode A: Optimized Server-Side Hydration (NEW) ---
         const formData = new FormData();
-        formData.append('projectDataJson', JSON.stringify(projectData));
+        if (chipId) formData.append('chipId', chipId);
+        else formData.append('projectDataJson', JSON.stringify(projectData));
+
         formData.append('params', JSON.stringify({
           targets: injectionTargets,
           severity,
@@ -100,11 +108,16 @@ export const FaultInjectionPanel: React.FC = () => {
       
       // Now analyze the synthetic log to update topology
       const analyzeFormData = new FormData();
-      // Provide a minimal STIL blob for the analyze step
-      const stilBlob = stilText
-        ? new Blob([stilText], { type: 'text/plain' })
-        : new Blob([`// synthetic\n`], { type: 'text/plain' });
-      analyzeFormData.append('stil', stilBlob, 'design.stil');
+      
+      if (stilText) {
+        const stilBlob = new Blob([stilText], { type: 'text/plain' });
+        analyzeFormData.append('stil', stilBlob, 'design.stil');
+      } else {
+        // Optimized Hydration: send chipId to bypass massive JSON transfer
+        if (chipId) analyzeFormData.append('chipId', chipId);
+        else analyzeFormData.append('projectDataJson', JSON.stringify(projectData));
+      }
+
       const logBlob = new Blob([result.logText], { type: 'text/plain' });
       analyzeFormData.append('failLog', logBlob, 'synthetic_fail.log');
 
@@ -113,11 +126,20 @@ export const FaultInjectionPanel: React.FC = () => {
         body: analyzeFormData,
       });
 
-      if (!analyzeResponse.ok) throw new Error("Failed to analyze synthetic log");
+      if (!analyzeResponse.ok) {
+        const errorData = await analyzeResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to analyze synthetic log");
+      }
       
       const analyzeResult = await analyzeResponse.json();
       setProjectData(analyzeResult.projectData);
       setFailingFFs(analyzeResult.failingFFs);
+
+      // Trigger metric update in parent view
+      if (onResult) {
+        onResult(analyzeResult.chipResult, analyzeResult.projectData.failedChains, analyzeResult.projectData.failureDetails);
+      }
+      
       setViewMode('topology');
     } catch (err) {
       console.error(err);

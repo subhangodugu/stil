@@ -1,9 +1,11 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
 export interface FF {
   id: string;
   localIndex: number;
   globalIndex: number;
+  clockDomain?: string;
 }
 
 export interface ScanChain {
@@ -46,9 +48,16 @@ export interface ProjectData {
   testerCycles: number;
   totalPatterns: number;
   signals: Record<string, string>;
+  macros?: Record<string, Array<{ signal: string; bitstream: string }>>;
   faults: Fault[];
   localizationMessage?: string;
   heatmap?: HeatmapData;
+  rawStilSnippet?: string;
+  rawStilTail?: string;
+  rawLogSnippet?: string;
+  compressionType?: string;
+  scanClock?: string;
+  timingSetName?: string;
   schemaVersion?: number;
   topologyFaultMap?: Array<{ chainName: string; mismatchCount: number; severity: string }>;
   localizedFaults?: Array<{ patternId: string; chainName: string; ffPosition: number; expected: string; actual: string }>;
@@ -83,6 +92,8 @@ interface AppState {
     currentCycle: number;
     totalCycles: number;
     currentPattern: string;
+    currentPatternIndex: number;
+    totalPatterns: number;
     mismatchCount: number;
     isStreaming: boolean;
   };
@@ -92,6 +103,27 @@ interface AppState {
     hotspots: any[];
     patterns: any[];
     clusters: any[];
+  };
+
+  waveformFocus: {
+    chainName: string | null;
+    bitIndex: number | null;
+    zoom: number;
+    offset: number;
+    autoScroll: boolean;
+  };
+
+  aiConfig: {
+    apiKey: string | null;
+    model: string;
+  };
+
+  ingestionProgress: {
+    active: boolean;
+    files: Record<string, {
+      status: 'READING' | 'AI_AUDIT' | 'SIMULATING' | 'PERSISTING' | 'COMPLETE' | 'FAILED';
+      details?: any;
+    }>;
   };
   
   setProjectData: (data: ProjectData) => void;
@@ -106,50 +138,118 @@ interface AppState {
   setGeneratedResults: (log: string | null, json: any | null) => void;
   setDashboardChips: (chips: any[]) => void;
   updateStreamingMetrics: (metrics: Partial<AppState['streamingMetrics']>) => void;
+  setAIConfig: (config: Partial<AppState['aiConfig']>) => void;
+  setWaveformFocus: (focus: Partial<AppState['waveformFocus']>) => void;
+  setIngestionProgress: (filename: string, progress: any) => void;
+  clearIngestion: () => void;
   reset: () => void;
 }
 
-export const useStore = create<AppState>((set) => ({
-  projectData: null,
-  failingFFs: {},
-  selectedChain: null,
-  loading: false,
-  error: null,
-  injectionTargets: [],
-  stilText: null,
-  generatedLog: null,
-  generatedJsonOutput: null,
-  analyticsData: {
-    yieldTrend: [],
-    hotspots: [],
-    patterns: [],
-    clusters: [],
-  },
-  dashboardChips: [],
-  
-  streamingMetrics: {
-    currentCycle: 0,
-    totalCycles: 0,
-    currentPattern: 'Initialization...',
-    mismatchCount: 0,
-    isStreaming: false,
-  },
-  
-  viewMode: 'dashboard', 
-  
-  setProjectData: (data) => set({ projectData: data }),
-  setFailingFFs: (fails) => set({ failingFFs: fails }),
-  setSelectedChain: (chain) => set({ selectedChain: chain }),
-  setViewMode: (mode) => set({ viewMode: mode }),
-  setLoading: (loading) => set({ loading }),
-  setAnalyticsData: (data) => set({ analyticsData: { ...data } }),
-  setError: (error) => set({ error }),
-  setInjectionTargets: (targets) => set({ injectionTargets: targets }),
-  setStilText: (stilText) => set({ stilText }),
-  setGeneratedResults: (log, json) => set({ generatedLog: log, generatedJsonOutput: json }),
-  setDashboardChips: (chips) => set({ dashboardChips: chips }),
-  updateStreamingMetrics: (metrics) => set((state) => ({ 
-    streamingMetrics: { ...state.streamingMetrics, ...metrics } 
-  })),
-  reset: () => set({ projectData: null, failingFFs: {}, selectedChain: null, error: null, injectionTargets: [], stilText: null, generatedLog: null, generatedJsonOutput: null, viewMode: 'dashboard', dashboardChips: [], analyticsData: { yieldTrend: [], hotspots: [], patterns: [], clusters: [] }, streamingMetrics: { currentCycle: 0, totalCycles: 0, currentPattern: 'Initialization...', mismatchCount: 0, isStreaming: false } }),
-}));
+export const useStore = create<AppState>()(
+  persist(
+    (set) => ({
+      projectData: null,
+      failingFFs: {},
+      selectedChain: null,
+      loading: false,
+      error: null,
+      injectionTargets: [],
+      stilText: null,
+      generatedLog: null,
+      generatedJsonOutput: null,
+      analyticsData: {
+        yieldTrend: [],
+        hotspots: [],
+        patterns: [],
+        clusters: [],
+      },
+      waveformFocus: {
+        chainName: null,
+        bitIndex: null,
+        zoom: 1.0,
+        offset: 0,
+        autoScroll: true,
+      },
+      ingestionProgress: {
+        active: false,
+        files: {},
+      },
+      dashboardChips: [],
+      
+      streamingMetrics: {
+        currentCycle: 0,
+        totalCycles: 0,
+        currentPattern: 'Initialization...',
+        currentPatternIndex: 0,
+        totalPatterns: 0,
+        mismatchCount: 0,
+        isStreaming: false,
+      },
+
+      aiConfig: {
+        apiKey: null,
+        model: 'llama-3.3-70b-versatile',
+      },
+      
+      viewMode: 'dashboard', 
+      
+      setProjectData: (data) => set({ projectData: data }),
+      setFailingFFs: (fails) => set({ failingFFs: fails }),
+      setSelectedChain: (chain) => set({ selectedChain: chain }),
+      setViewMode: (mode) => set({ viewMode: mode }),
+      setLoading: (loading) => set({ loading }),
+      setAnalyticsData: (data) => set({ analyticsData: { ...data } }),
+      setError: (error) => set({ error }),
+      setInjectionTargets: (targets) => set({ injectionTargets: targets }),
+      setStilText: (stilText) => set({ stilText }),
+      setGeneratedResults: (log, json) => set({ generatedLog: log, generatedJsonOutput: json }),
+      setDashboardChips: (chips) => set({ dashboardChips: chips }),
+      updateStreamingMetrics: (metrics) => set((state) => ({ 
+        streamingMetrics: { ...state.streamingMetrics, ...metrics } 
+      })),
+      setAIConfig: (config) => set((state) => ({
+        aiConfig: { ...state.aiConfig, ...config }
+      })),
+      reset: () => set({ 
+        projectData: null, 
+        failingFFs: {}, 
+        selectedChain: null, 
+        error: null, 
+        injectionTargets: [], 
+        stilText: null, 
+        generatedLog: null, 
+        generatedJsonOutput: null, 
+        viewMode: 'dashboard', 
+        dashboardChips: [], 
+        analyticsData: { yieldTrend: [], hotspots: [], patterns: [], clusters: [] }, 
+        streamingMetrics: { 
+          currentCycle: 0, 
+          totalCycles: 0, 
+          currentPattern: 'Initialization...', 
+          currentPatternIndex: 0,
+          totalPatterns: 0,
+          mismatchCount: 0, 
+          isStreaming: false 
+        },
+        waveformFocus: { chainName: null, bitIndex: null, zoom: 1.0, offset: 0, autoScroll: true },
+        ingestionProgress: { active: false, files: {} }
+      }),
+      setWaveformFocus: (focus) => set((state) => ({ waveformFocus: { ...state.waveformFocus, ...focus } })),
+      setIngestionProgress: (filename, progress) => set((state) => ({
+        ingestionProgress: {
+          active: true,
+          files: {
+            ...state.ingestionProgress.files,
+            [filename]: progress
+          }
+        }
+      })),
+      clearIngestion: () => set({ ingestionProgress: { active: false, files: {} } }),
+    }),
+    {
+      name: 'stil-analyzer-storage',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({ aiConfig: state.aiConfig }), // Only persist aiConfig
+    }
+  )
+);

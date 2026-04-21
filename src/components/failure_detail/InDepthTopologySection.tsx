@@ -1,23 +1,30 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LayoutGrid, AlertTriangle, ShieldCheck, Cpu, Info } from 'lucide-react';
+import { LayoutGrid, AlertTriangle, ShieldCheck, Cpu, Info, Zap } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { cn } from '../../lib/utils';
 import { getFaultDisplay } from '../../lib/faultTerminology';
 
 export default function InDepthTopologySection() {
-  const { projectData } = useStore();
+  const { projectData, injectionTargets, setSelectedChain, setViewMode } = useStore();
   const [hoveredBit, setHoveredBit] = useState<any>(null);
 
   if (!projectData || !projectData.scanChains) return null;
 
   const { scanChains, localizedFaults = [] } = projectData;
 
-  // Create a fast lookup map for faults: chainName -> Set(ffPosition)
+  // Create a fast lookup map for physical faults: chainName -> Map(ffPosition -> fault)
   const faultLookup = new Map<string, Map<number, any>>();
   localizedFaults.forEach(f => {
     if (!faultLookup.has(f.chainName)) faultLookup.set(f.chainName, new Map());
     faultLookup.get(f.chainName)!.set(f.ffPosition, f);
+  });
+
+  // Create a fast lookup map for injected faults: chainName -> Map(ffPosition -> faultType)
+  const injectionLookup = new Map<string, Map<number, string>>();
+  injectionTargets.forEach(t => {
+    if (!injectionLookup.has(t.chainName)) injectionLookup.set(t.chainName, new Map());
+    injectionLookup.get(t.chainName)!.set(t.bitPosition, t.faultType);
   });
 
   return (
@@ -42,15 +49,20 @@ export default function InDepthTopologySection() {
           </div>
           <div className="flex items-center gap-2">
             <div className="w-2.5 h-2.5 rounded-sm bg-red-500 border border-red-400 shadow-[0_0_8px_rgba(239,68,68,0.4)]" />
-            Failed Bit
+            Failed Bit / SA1
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-sm bg-white border border-slate-300 shadow-[0_0_8px_rgba(255,255,255,0.4)]" />
+            SA0 Fault
           </div>
         </div>
       </div>
 
       <div className="p-8 space-y-8 max-h-[600px] overflow-y-auto custom-scrollbar">
         {scanChains.map((chain, cIdx) => {
-          const chainFaults = faultLookup.get(chain.name);
-          const hasFailures = !!chainFaults;
+          const chainFaults = new Map<string, any>();
+          (projectData.faults || []).filter(f => f.channel === chain.name).forEach(f => chainFaults.set(f.ff, f));
+          const hasFailures = chainFaults.size > 0;
 
           return (
             <div key={chain.name || cIdx} className="space-y-3 group/chain">
@@ -63,40 +75,52 @@ export default function InDepthTopologySection() {
                     {chain.name}
                   </span>
                   <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-500 font-bold">
-                    {chain.length} Bits
+                    {chain.length} BITS • {chain.ffs?.[0]?.clockDomain || 'GLOBAL'}
                   </span>
                 </div>
                 {hasFailures && (
                   <div className="flex items-center gap-2 text-red-400 font-black text-[9px] uppercase tracking-widest animate-pulse">
                     <AlertTriangle size={12} />
-                    {chainFaults.size} Critical Failures detected
+                    {chainFaults.size} ROOT FAULTS LOCALIZED
                   </div>
                 )}
               </div>
 
               {/* Bit Grid - Representing the Scan Chain Architecture */}
               <div className="flex flex-wrap gap-1 p-3 bg-slate-950/40 border border-slate-800/50 rounded-xl relative">
-                {Array.from({ length: chain.length }).map((_, fIdx) => {
-                  const fault = chainFaults?.get(fIdx);
+                {chain.ffs.map((ff, fIdx) => {
+                  const injectedType = injectionLookup.get(chain.name)?.get(fIdx);
+                  const fault = faultLookup.get(chain.name)?.get(fIdx);
                   const isFailing = !!fault;
+                  const isInjected = !!injectedType;
 
                   // For memory performance, we only want to show labels for important bits or sample them
-                  const shouldShowIndex = fIdx % 20 === 0 || isFailing;
+                  const shouldShowIndex = fIdx % 20 === 0 || isFailing || isInjected;
 
                   return (
                     <div 
-                      key={fIdx} 
+                      key={ff.id} 
                       className="relative"
-                      onMouseEnter={() => isFailing && setHoveredBit({ ...fault, chainIndex: cIdx + 1, ffId: chain.ffs?.[fIdx]?.id })}
+                      onMouseEnter={() => setHoveredBit({ ...ff, fault, injectedType, chainName: chain.name })}
                       onMouseLeave={() => setHoveredBit(null)}
                     >
                       <motion.div 
                         whileHover={{ scale: 1.2 }}
+                        onClick={() => {
+                          const state = useStore.getState();
+                          state.setWaveformFocus({
+                             chainName: chain.name,
+                             bitIndex: fIdx,
+                             autoScroll: false
+                          });
+                          state.setSelectedChain(chain); // Sync selection across detail views
+                        }}
                         className={cn(
-                          "w-3 h-3 rounded-sm transition-all duration-300 cursor-help",
-                          isFailing 
-                            ? "bg-red-500 border border-red-400 shadow-[0_0_10px_rgba(239,68,68,0.5)] z-10" 
-                            : "bg-slate-800/50 border border-slate-700 hover:bg-cyan-500/20 hover:border-cyan-500/50"
+                          "w-3 h-3 rounded-sm transition-all duration-300 cursor-help active:scale-95",
+                          isFailing && !isInjected && "bg-red-500 border border-red-400 shadow-[0_0_10px_rgba(239,68,68,0.5)] z-10",
+                          isInjected && injectedType === 'SA1' && "bg-red-500 border border-red-300 shadow-[0_0_15px_rgba(239,68,68,0.8)] z-10 animate-pulse",
+                          isInjected && injectedType === 'SA0' && "bg-white border border-slate-200 shadow-[0_0_15px_rgba(255,255,255,0.8)] z-10 animate-pulse",
+                          !isFailing && !isInjected && "bg-slate-800/50 border border-slate-700 hover:bg-cyan-500/20 hover:border-cyan-500/50"
                         )}
                       />
                       {shouldShowIndex && (
@@ -115,49 +139,65 @@ export default function InDepthTopologySection() {
                       initial={{ opacity: 0, scale: 0.9 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.9 }}
-                      className="fixed z-[100] bg-slate-950 border border-slate-700 p-4 rounded-xl shadow-2xl pointer-events-none"
+                      className="fixed z-[100] bg-slate-150 border border-slate-700 p-4 rounded-xl shadow-2xl pointer-events-none min-w-[200px]"
                       style={{ 
                         left: '50%', 
                         top: '50%', 
                         transform: 'translate(-50%, -50%)',
-                        boxShadow: '0 0 40px rgba(0,0,0,0.5), 0 0 20px rgba(239,68,68,0.1)' 
+                        backgroundColor: '#020617',
+                        boxShadow: '0 0 40px rgba(0,0,0,0.8), 0 0 20px rgba(239,68,68,0.2)' 
                       }}
                     >
                       <div className="flex items-center gap-3 mb-3 pb-3 border-b border-slate-800">
-                        <div className="p-2 bg-red-500/10 rounded-lg">
-                          <AlertTriangle className="text-red-500" size={16} />
+                        <div className={cn("p-2 rounded-lg", (hoveredBit.fault || hoveredBit.injectedType) ? "bg-red-500/10" : "bg-cyan-500/10")}>
+                          {(hoveredBit.fault || hoveredBit.injectedType) ? <AlertTriangle className={cn(hoveredBit.injectedType === 'SA0' ? "text-white" : "text-red-500")} size={16} /> : <Cpu className="text-cyan-400" size={16} />}
                         </div>
                         <div>
                           <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest flex items-center gap-2">
-                            Fault Localized
-                            <span className="text-[8px] px-1.5 py-0.5 bg-red-500/20 text-red-400 rounded border border-red-500/30">
-                              {hoveredBit.expected === '1' && hoveredBit.actual === '0' ? getFaultDisplay('SA0').long : hoveredBit.expected === '0' && hoveredBit.actual === '1' ? getFaultDisplay('SA1').long : 'LOGIC MISMATCH'}
-                            </span>
+                            {hoveredBit.injectedType ? '[FAULT INJECTED]' : (hoveredBit.fault ? 'Silicon Defect' : 'Nominal State')}
+                            {(hoveredBit.fault || hoveredBit.injectedType) && (
+                              <span className={cn(
+                                "text-[8px] px-1.5 py-0.5 rounded border font-black uppercase tracking-widest",
+                                hoveredBit.injectedType === 'SA0' ? "bg-white text-slate-900 border-white" : "bg-red-500/20 text-red-400 border-red-500/30"
+                              )}>
+                                {hoveredBit.injectedType ?? hoveredBit.fault.faultType}
+                              </span>
+                            )}
                           </p>
-                          <p className="text-xs font-bold text-white">
-                            CH {hoveredBit.chainIndex} • {hoveredBit.ffId ? `FF: ${hoveredBit.ffId}` : `Position ${hoveredBit.ffPosition}`}
+                          <p className="text-xs font-bold text-white uppercase">
+                            {hoveredBit.id}
                           </p>
                         </div>
                       </div>
                       
                       <div className="space-y-2">
                         <div className="flex justify-between gap-8">
-                          <span className="text-[10px] text-slate-500 uppercase font-bold">Pattern ID</span>
-                          <span className="text-[10px] text-white font-mono">{hoveredBit.patternId}</span>
+                          <span className="text-[10px] text-slate-500 uppercase font-bold">Shift Position</span>
+                          <span className="text-[10px] text-white font-mono">{hoveredBit.localIndex}</span>
                         </div>
                         <div className="flex justify-between gap-8">
-                          <span className="text-[10px] text-slate-500 uppercase font-bold">Expected State</span>
-                          <span className="text-[10px] text-emerald-400 font-mono">{hoveredBit.expected}</span>
+                          <span className="text-[10px] text-slate-500 uppercase font-bold">Clock Domain</span>
+                          <span className="text-[10px] text-cyan-400 font-mono font-black">{hoveredBit.clockDomain}</span>
                         </div>
-                        <div className="flex justify-between gap-8">
-                          <span className="text-[10px] text-slate-500 uppercase font-bold">ATE Actual State</span>
-                          <span className="text-[10px] text-red-400 font-mono">{hoveredBit.actual}</span>
-                        </div>
+                        {hoveredBit.fault && (
+                          <>
+                            <div className="flex justify-between gap-8">
+                              <span className="text-[10px] text-slate-500 uppercase font-bold">Confidence</span>
+                              <span className="text-[10px] text-red-400 font-black">{hoveredBit.fault.confidence}%</span>
+                            </div>
+                            <div className="flex justify-between gap-8">
+                              <span className="text-[10px] text-slate-500 uppercase font-bold">Fail Count</span>
+                              <span className="text-[10px] text-red-400 font-black">{hoveredBit.fault.failCount} cycles</span>
+                            </div>
+                          </>
+                        )}
                       </div>
 
                       <div className="mt-4 pt-3 border-t border-slate-800 flex items-center gap-2">
-                        <Info size={10} className="text-cyan-500" />
-                        <span className="text-[9px] text-slate-600 font-bold uppercase tracking-widest italic">Physical Silicon Mismatch</span>
+                        {hoveredBit.injectedType ? <Zap size={10} className="text-amber-400" /> : <Info size={10} className="text-indigo-400" />}
+                        <span className="text-[9px] text-slate-600 font-bold uppercase tracking-widest italic">
+                          {hoveredBit.injectedType ? 'Synthetic User defect applied' : (hoveredBit.fault ? 'Root Fault Observation' : 'No Mismatch Detected')}
+                        </span>
                       </div>
                     </motion.div>
                   )}

@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import TesterDashboard from './pages/TesterDashboard';
 import FailureDetailView from './pages/FailureDetailView';
 import IntelligenceView from './pages/IntelligenceView';
+import { IngestionMonitor } from './components/IngestionMonitor';
 /** @version 3.0.0 - Streamlined routing — Dashboard-first architecture */
 
 // --- MAIN APP ENTRY ---
@@ -35,6 +36,7 @@ function MainLayout() {
         <Header onStartStreaming={startStreaming} />
         <ChainDetailModal />
         <LiveDiagnosticOverlay />
+        <IngestionMonitor />
 
         {error && (
           <motion.div

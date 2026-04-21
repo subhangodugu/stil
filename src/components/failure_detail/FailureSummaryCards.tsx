@@ -41,9 +41,9 @@ export default function FailureSummaryCards({ chip, details, failedChains }: Pro
       color: 'border-blue-500/20'
     },
     {
-      label: 'Vector Accuracy',
+      label: 'Vector Integrity',
       value: chip.accuracy != null ? `${Number(chip.accuracy).toFixed(2)}%` : 'N/A',
-      sub: chip.total_vectors > 0 ? `${chip.total_vectors.toLocaleString()} total vectors` : 'No vector data',
+      sub: `${(chip.tester_cycles || 0).toLocaleString()} Tester Cycles`,
       icon: <Activity className="text-indigo-400" size={20} />,
       color: 'border-indigo-500/20'
     }

@@ -7,6 +7,8 @@ export interface ScanChain {
     id: string;
     localIndex: number;
     globalIndex: number;
+    clockDomain?: string;
+    type?: string;
   }>;
 }
 
@@ -52,6 +54,11 @@ export interface HeatmapData {
   channelHeatmap: Record<string, { heatScore: number; color: string }>;
 }
 
+export interface MacroMapping {
+  signal: string;
+  bitstream: string;
+}
+
 export interface STILUnified {
   // Common Data
   scanChains: ScanChain[];
@@ -63,10 +70,12 @@ export interface STILUnified {
   totalPatterns: number; // Compatible with legacy (maps to patternCount)
   patterns: PatternData[]; // Deterministic Bit-Accurate Models
   signals: Record<string, string>;
+  macros: Record<string, MacroMapping[]>;
   faults: Fault[];
   localizationMessage?: string;
   heatmap?: HeatmapData;
   rawStilSnippet?: string;
+  rawStilTail?: string;
   rawLogSnippet?: string;
 
   // Metadata for Injection/Simulation
@@ -151,290 +160,236 @@ function extractBalancedBlock(text: string, startIndex: number): string {
   // Return content without outer braces
   return block.length > 2 ? block.slice(1, -1).trim() : "";
 }
-
-/**
- * Extracts a block (e.g., Pattern, Procedures) by name using the balanced scanner
- */
-function extractNamedBlock(text: string, keyword: string, name?: string): string | null {
-  const regexString = name 
-    ? `${keyword}\\s+["']?${name}["']?\\s*\\{`
-    : `${keyword}\\s*\\{`;
-  const regex = new RegExp(regexString, 'i');
-  const match = regex.exec(text);
-
-  if (!match) return null;
-
-  const braceStart = text.indexOf("{", match.index);
-  if (braceStart === -1) return null;
-  
-  return extractBalancedBlock(text, braceStart);
+function extractSubBlocks(t: string, k: string, m: Map<string, string>) {
+  [...t.matchAll(new RegExp(`${k}\\s+["']?(\\w+)["']?\\s*\\{`, 'gi'))].forEach(x => m.set(x[1], extractBalancedBlock(t, t.indexOf("{", x.index))));
 }
 
-export function parseSTIL(stilText: string, failLogText?: string): STILUnified {
-  const debugReport = {
-    patternBurstsFound: 0,
-    proceduresFound: 0,
-    expandedPatterns: 0,
-    scanVectorsExtracted: 0,
-    pinDetectionMode: 'heuristic' as 'explicit' | 'heuristic',
-    mappedScanOutPins: [] as string[],
-    executionGraph: [] as string[],
-    mappingLogs: [] as string[]
-  };
+interface ExecutionNode { type: 'Pattern' | 'Call'; name: string; content?: string; }
 
-  // 1. Foundation: Signals & SignalGroups
+const extractBlocks = (text: string, kw: string, map = new Map<string, string>()) => {
+  const reg = new RegExp(`${kw}(?:Defs)?\\s*(?:["']?\\w+["']?\\s*)?\\{`, 'gi');
+  let m; while ((m = reg.exec(text))) {
+    const s = text.indexOf("{", m.index);
+    const content = extractBalancedBlock(text, s);
+    if (!m[0].includes('"') && !m[0].includes("'")) { // Container
+      extractSubBlocks(content, kw === "Macro" ? "Macro" : "Procedure", map);
+    } else { // Single named block
+      const name = m[0].match(/["']?(\w+)["']?/)?.[1] || "Unknown";
+      if (content) map.set(name, content);
+    }
+  }
+  return map;
+};
+
+export function parseSTIL(stilText: string, failLogText?: string): STILUnified {
+  const debugReport = { 
+    patternBurstsFound: 0, 
+    proceduresFound: 0, 
+    expandedPatterns: 0, 
+    scanVectorsExtracted: 0, 
+    pinDetectionMode: 'heuristic' as any, 
+    mappedScanOutPins: [], 
+    executionGraph: [], 
+    mappingLogs: [] 
+  };
   const signals: Record<string, string> = {};
   const signalGroups: Record<string, string[]> = {};
 
-  // Extract from ALL Signals { ... } blocks
-  const signalBlockRegex = /Signals\s*\{/gi;
-  let ssMatch;
-  while ((ssMatch = signalBlockRegex.exec(stilText)) !== null) {
-    const braceStart = stilText.indexOf("{", ssMatch.index);
-    const content = extractBalancedBlock(stilText, braceStart);
-    const sigLineRegex = /["']?([\w\.]+)["']?\s+(In|Out|InOut);/gi;
-    let sMatch;
-    while ((sMatch = sigLineRegex.exec(content)) !== null) {
-      signals[sMatch[1]] = sMatch[2];
-    }
+  // 1. Foundation: Extract Signals & Groups
+  const sigMatch = stilText.matchAll(/Signals\s*\{([\s\S]*?)\}/gi);
+  for (const m of sigMatch) {
+    [...m[1].matchAll(/["']?([\w\.-]+)["']?\s+(In|Out|InOut);/gi)].forEach(s => signals[s[1]] = s[2]);
   }
 
-  // Extract from ALL SignalGroups { ... } blocks
-  const groupBlockRegex = /SignalGroups\s*\{/gi;
-  let ggMatch;
-  while ((ggMatch = groupBlockRegex.exec(stilText)) !== null) {
-    const braceStart = stilText.indexOf("{", ggMatch.index);
-    const content = extractBalancedBlock(stilText, braceStart);
-    const groupRegex = /(\w+)\s*=\s*['"](.*?)['"]\s*(?:\{.*?\})?\s*;/g;
-    let gMatch;
-    while ((gMatch = groupRegex.exec(content)) !== null) {
-      const gName = gMatch[1];
-      const pinsStr = gMatch[2];
-      const pins = pinsStr.split('+').map(p => p.trim().replace(/['"]/g, ""));
-      signalGroups[gName] = pins;
-    }
+  const groupMatch = stilText.matchAll(/SignalGroups\s*\{([\s\S]*?)\}/gi);
+  for (const m of groupMatch) {
+    [...m[1].matchAll(/(\w+)\s*=\s*['"](.*?)['"]\s*;/g)].forEach(g => signalGroups[g[1]] = g[2].split('+').map(p => p.trim().replace(/['"]/g, "")));
   }
 
-  // 2. Scan Structures (Lexical)
+  // 2. Scan Structures (Lexical Discovery Engine)
   const scanChains: ScanChain[] = [];
   const scanLengthPerChain: Record<string, number> = {};
   const chainOffsets: Record<string, number> = {};
   const internalChainMapping: Record<string, string> = {};
   let globalFFIndex = 0;
 
-  // Extract from ALL ScanStructures { ... } blocks
-  const structureBlockRegex = /ScanStructures\s+["']?(\w+)?["']?\s*\{/gi;
-  let structMatch;
-  while ((structMatch = structureBlockRegex.exec(stilText)) !== null) {
-    const braceStart = stilText.indexOf("{", structMatch.index);
-    const structuresContent = extractBalancedBlock(stilText, braceStart);
+  const structuresContent = extractNamedBlock(stilText, "ScanStructures") || stilText;
+  const chainBlockRegex = /ScanChain\s+["']?([\w\d\.\[\]-]+)["']?\s*\{/g;
+  let cMatch;
+
+  while ((cMatch = chainBlockRegex.exec(structuresContent)) !== null) {
+    const chainName = cMatch[1];
+    const braceStart = structuresContent.indexOf("{", cMatch.index);
+    const content = extractBalancedBlock(structuresContent, braceStart);
+
+    const lengthMatch = content.match(/ScanLength\s+(\d+)/);
+    const length = lengthMatch ? parseInt(lengthMatch[1]) : 0;
+    if (length === 0) continue;
+
+    const scanInMatch = content.match(/ScanIn\s+["']?([\w\d\.\[\]-]+)["']?/);
+    const scanOutMatch = content.match(/ScanOut\s+["']?([\w\d\.\[\]-]+)["']?/);
     
-    const chainBlockRegex = /ScanChain\s+["']?(\w+)["']?\s*\{/g;
-    let cMatch;
-    while ((cMatch = chainBlockRegex.exec(structuresContent)) !== null) {
-      const chainName = cMatch[1];
-      const bStart = structuresContent.indexOf("{", cMatch.index);
-      const content = extractBalancedBlock(structuresContent, bStart);
+    // Industrial Clock Attribution
+    const clockDomain = stilText.match(/ScanClock\s+["']?(\w+)["']?/)?.[1] || "GlobalClock";
 
-      const lengthMatch = content.match(/ScanLength\s+(\d+)/);
-      const length = lengthMatch ? parseInt(lengthMatch[1]) : 0;
-      
-      if (length === 0 && content.includes("ScanLength")) continue;
+    const ffs = Array.from({ length }, (_, i) => ({
+      id: `FF_${globalFFIndex + i}`,
+      localIndex: i,
+      globalIndex: globalFFIndex + i,
+      clockDomain: clockDomain
+    }));
 
-      const scanInMatch = content.match(/ScanIn\s+["']?(\w+)["']?/);
-      const scanOutMatch = content.match(/ScanOut\s+["']?(\w+)["']?/);
-
-      const ffs = Array.from({ length }, (_, i) => ({
-        id: `FF_${globalFFIndex + i}`,
-        localIndex: i,
-        globalIndex: globalFFIndex + i,
-      }));
-
-      scanChains.push({ 
-        name: chainName, 
-        length, 
-        scanIn: scanInMatch ? scanInMatch[1] : 'Unknown', 
-        scanOut: scanOutMatch ? scanOutMatch[1] : 'Unknown', 
-        ffs 
-      });
-      
-      scanLengthPerChain[chainName] = length;
-      chainOffsets[chainName] = globalFFIndex;
-      
-      if (chainName.toLowerCase().includes("channel") || chainName.toLowerCase().includes("edt")) {
-        internalChainMapping[chainName] = `EDT_${chainName.replace(/\D/g, "")}`;
-      }
-      
-      globalFFIndex += length;
-    }
+    scanChains.push({ 
+      name: chainName, 
+      length, 
+      scanIn: scanInMatch ? scanInMatch[1] : 'Unknown', 
+      scanOut: scanOutMatch ? scanOutMatch[1] : 'Unknown', 
+      ffs 
+    });
+    
+    scanLengthPerChain[chainName] = length;
+    chainOffsets[chainName] = globalFFIndex;
+    if (/channel|edt/i.test(chainName)) internalChainMapping[chainName] = `EDT_${chainName.replace(/\D/g, "")}`;
+    globalFFIndex += length;
   }
 
-  // 3. Modular Diagnostic Pipeline (Industrial)
-  const proceduresMap = extractProceduresMap(stilText);
-  // Add MacroDefs support
-  const macrosMap = extractNamedBlockMap(stilText, "MacroDefs");
-  macrosMap.forEach((v, k) => proceduresMap.set(k, v));
-
-  const burstMatch = stilText.match(/PatternBurst\s+["']?(\w+)["']?/);
-  const activeBurst = burstMatch ? burstMatch[1] : (stilText.match(/PatternExec\s*\{.*?PatternBurst\s+["']?(\w+)["']?/s)?.[1] || "Unknown");
+  // 3. Modular Diagnostic Pipeline: Procedures & Macros
+  const proceduresMap = extractBlocks(stilText, "Procedure");
+  const macrosMap = extractBlocks(stilText, "Macro");
+  const macros: Record<string, MacroMapping[]> = {};
   
-  const executionGraph = resolveExecutionGraph(stilText, activeBurst);
+  macrosMap.forEach((c, n) => {
+    macros[n] = c.split(';').filter(l => l.includes('=')).map(l => ({ signal: l.split('=')[0].trim().replace(/['"]/g, ""), bitstream: l.split('=')[1].trim() }));
+    // Industrial Bridge: Macros double as diagnostic procedures in complex cycles
+    if (!proceduresMap.has(n)) proceduresMap.set(n, c);
+  });
+
+  // 4. Execution Graph Discovery
+  const activeBurst = stilText.match(/PatternBurst\s+["']?(\w+)["']?/)?.[1] || "Unknown";
   const { pins: scanOutPins, mode: pinMappingMode } = getScanOutPins(scanChains);
-  
-  const mappingLogs: string[] = [`[INIT] Pin Mapping Mode: ${pinMappingMode.toUpperCase()}`];
-  if (pinMappingMode === 'explicit') {
-    mappingLogs.push(`[INIT] Mapped Pins: ${scanOutPins.join(', ')}`);
-  }
+  console.log(`[STIL] Detected ScanOut Pins: ${scanOutPins.join(', ')} (Mode: ${pinMappingMode})`);
+  const executionGraph = resolveExecutionGraph(stilText, activeBurst);
 
-  // 4. Industrial Deterministic Extraction (User spec v4)
+  // 5. Industrial Deterministic Expansion (Pattern Level)
   const patterns: PatternData[] = [];
-  const cycleInfo = { current: 100 };
+  const cycleInfo = { current: 0 };
   const memo = new Map<string, string[][]>();
 
   for (const node of executionGraph) {
     if (node.type === 'Pattern' && node.content) {
-      const patternId = node.name;
-      const body = node.content;
-      
-      const expanded = expandVectors(body, proceduresMap, scanOutPins, signalGroups, memo, debugReport.mappingLogs, cycleInfo);
-      
+      // Industrial Sync: Extract specific pattern ID if the content starts with a label "pattern X":
+      const labelMatch = node.content.match(/^"pattern\s+(\d+)"\s*:/i);
+      const effectiveId = labelMatch ? `Pattern_${labelMatch[1]}` : node.name;
+
+      const expanded = expandVectors(node.content, proceduresMap, scanOutPins, signalGroups, memo, debugReport.mappingLogs, cycleInfo);
       const vectors: VectorEntry[] = expanded.map(v => ({
         cycle: cycleInfo.current++,
         scan: v[0] || ""
       }));
-
-      if (vectors.length > 0) {
-        patterns.push({ patternId, vectors });
-      }
+      if (vectors.length > 0) patterns.push({ patternId: effectiveId, vectors });
     }
   }
 
-  // 4. Industrial Metric Extraction (User spec v4.2)
-  // Extract REAL logical pattern count from ATE annotations
-  // Priority: pattern_end (Header) > Total Patterns (Summ) > highest Pattern:N label
-  const patternMetaMatch = stilText.match(/pattern_end\s*=\s*(\d+)/i) ||
-                           stilText.match(/Total\s+Patterns\s*[:=]\s*(\d+)/i) ||
-                           stilText.match(/Pattern\s*[:]\s*(\d+)/i);
-  let logicalPatterns = patternMetaMatch ? parseInt(patternMetaMatch[1], 10) : patterns.length;
-  
-  // If we have pattern labels, use the highest one as logical count if it's larger
-  const allLabels = patterns.map(p => parseInt(p.patternId, 10)).filter(n => !isNaN(n));
-  
-  // SCAN INSIDE BODIES for Pattern:N comments (Common in Tessent/Modus consolidated STIL)
-  let intraBlockMax = 0;
-  for (const node of executionGraph) {
-    if (node.content) {
-      const matches = node.content.match(/Pattern\s*[:]\s*(\d+)/gi);
-      if (matches) {
-        matches.forEach(m => {
-          const num = parseInt(m.match(/\d+/)![0], 10);
-          if (num > intraBlockMax) intraBlockMax = num;
-        });
-      }
-    }
-  }
-
-  logicalPatterns = Math.max(logicalPatterns, ...allLabels, intraBlockMax);
-
-  const patternCount = patterns.length; // physical blocks
-  const vectorCount = patterns.reduce((sum, p) => sum + p.vectors.length, 0);
-  const testerCycles = cycleInfo.current;
-  const expectedValues: string[][] = patterns.map(p => p.vectors.map(v => v.scan));
-
-  // Build Final Unified Model
-  const hasEDT = stilText.toLowerCase().includes("edt") || 
-                 stilText.toLowerCase().includes("compression") ||
-                 stilText.toLowerCase().includes("decompressor");
-
+  const expectedValues = patterns.map(p => p.vectors.map(v => v.scan));
   const faults: Fault[] = [];
-  let localizationMessage = "";
 
   if (failLogText) {
     const failures = parseFailLog(failLogText, scanChains);
     scanChains.forEach(chain => {
-      const chainFailures = chain.ffs.filter(ff => failures[ff.id]).sort((a,b) => a.localIndex - b.localIndex);
-      if (chainFailures.length > 0) {
-        const firstFail = chainFailures[0];
-        const downstreamThreshold = (chain.length - firstFail.localIndex) * 0.7;
-        const isChainBreak = chainFailures.length > downstreamThreshold;
-
-        faults.push({
-          channel: chain.name,
-          ff: firstFail.id,
-          type: 'ROOT_FAULT',
-          faultType: isChainBreak ? 'CHAIN_BREAK' : (failures[firstFail.id] > 5 ? 'STUCK_AT_0' : 'INTERMITTENT'),
-          confidence: 90,
-          severity: isChainBreak ? 'CRITICAL' : 'MAJOR',
-          failCount: failures[firstFail.id],
-          description: isChainBreak ? `Chain break at ${firstFail.id}.` : `Localized fault at ${firstFail.id}.`
+      const cFail = chain.ffs.filter(ff => failures[ff.id]).sort((a,b) => a.localIndex - b.localIndex);
+      if (cFail.length) {
+        const first = cFail[0];
+        const isBreak = cFail.length > (chain.length - first.localIndex) * 0.7;
+        faults.push({ 
+          channel: chain.name, 
+          ff: first.id, 
+          type: 'ROOT_FAULT', 
+          faultType: isBreak ? 'CHAIN_BREAK' : (failures[first.id] > 5 ? 'STUCK_AT_0' : 'INTERMITTENT'), 
+          confidence: 90, 
+          severity: isBreak ? 'CRITICAL' : 'MAJOR', 
+          failCount: failures[first.id], 
+          description: `${isBreak ? 'Break' : 'Fault'} at ${first.id}` 
         });
       }
     });
-  } else {
-    localizationMessage = "No direct fault localization possible. Upload ATE log for diagnosis.";
   }
 
-  // Build pat patternVectors: decompose global scan-out strings into per-chain vectors
-  const patternVectors: PatternVector[] = [];
-  expectedValues.forEach((patternBits, pIdx) => {
-    const fullStr = patternBits[0] || "";
-    if (!fullStr) return;
-    scanChains.forEach(chain => {
-      const offset = chainOffsets[chain.name] ?? 0;
-      const len    = scanLengthPerChain[chain.name] ?? chain.length;
-      const slice  = fullStr.slice(offset, offset + len);
-      if (slice) {
-        patternVectors.push({
-          patternIndex: pIdx,
-          chain: chain.name,
-          shiftIn: slice,      // scan-in approximation (capture-mode STIL)
-          expectedOut: slice,  // expected scan-out (what we compare against)
-        });
-      }
-    });
+  // Decompose vectors per-chain for the Fault Engine
+  const patternVectors = expectedValues.flatMap((bits, pIdx) => {
+    const s = bits[0] || "";
+    return scanChains.map(c => ({ 
+      patternIndex: pIdx, 
+      chain: c.name, 
+      shiftIn: s.slice(chainOffsets[c.name]||0, (chainOffsets[c.name]||0) + c.length), 
+      expectedOut: s.slice(chainOffsets[c.name]||0, (chainOffsets[c.name]||0) + c.length) 
+    })).filter(v => v.shiftIn);
   });
+
+  const hasEDT = /edt|compression|decompressor/i.test(stilText);
 
   return {
     scanChains,
     hasEDT,
     totalFFs: globalFFIndex,
-    vectorCount,
-    patternCount, // physical blocks (resolved)
-    testerCycles,
-    totalPatterns: logicalPatterns, 
+    vectorCount: patterns.reduce((s, p) => s + p.vectors.length, 0),
+    patternCount: patterns.length,
+    testerCycles: cycleInfo.current,
+    
+    // Industrial Pattern Identification (v5)
+    // 1. Scan for annotations like Ann {* Pattern:29623 *} or //Pattern:29623
+    // 2. Fallback to patterns.length if no annotations are found.
+    totalPatterns: (() => {
+      const annMatches = [...stilText.matchAll(/Pattern:?\s*(\d+)/gi)];
+      if (annMatches.length > 0) {
+        const maxIdx = Math.max(...annMatches.map(m => parseInt(m[1])));
+        return maxIdx + 1; // 0-indexed adjustment
+      }
+      return patterns.length;
+    })(),
     patterns,
     signals,
+    macros,
     faults,
-    localizationMessage,
+    localizationMessage: failLogText ? "" : "No diagnostic possible. Upload log.",
     version: (stilText.match(/STIL\s+(\d+\.\d+);/) || [])[1] || "1.0",
-    patternBurst: activeBurst || "Unknown",
-    testType: (stilText.match(/Ann\s+\{\*\s+Test\s+Type:\s*(\w+)\s*\*}/i) || [])[1] || "FullScan",
+    patternBurst: activeBurst,
     scanChainNames: scanChains.map(c => c.name),
     scanLengthPerChain,
-    edtChannels: scanChains.map(c => c.name).filter(n => n.toLowerCase().includes("edt") || n.toLowerCase().includes("channel")),
     expectedValues,
     patternVectors,
     chainOffsets,
     internalChainMapping,
-    compressionType: hasEDT ? "EDT (Embedded Deterministic Test)" : "None",
+    scanChainCount: scanChains.length,
+    
+    // Industrial Forensic Metadata (Interface Sync)
+    testType: (stilText.match(/Ann\s+\{\*\s+Test\s+Type:\s*([\w ]+)\s*\*}/i) || [])[1] || "Industrial FullScan",
+    edtChannels: scanChains.map(c => c.name).filter(n => /channel|edt/i.test(n)),
+    compressionType: hasEDT ? "EDT (Embedded Deterministic Test)" : "Standard Bypass",
     scanClock: (stilText.match(/Signal\s+["']?(\w*clk\w*)["']?\s+\{.*?Type\s+In;/is) || [])[1] || "SCAN_CLK",
     shiftClock: "SCAN_CLK",
     captureClock: "SCAN_CLK",
-    timingSetName: (stilText.match(/Timing\s+["']?(\w+)["']?\s+\{/) || [])[1] || "Default_Timing",
-    scanChainCount: scanChains.length,
-    debugReport: {
-      patternBurstsFound: stilText.match(/PatternBurst\s+/g)?.length || 0,
-      proceduresFound: proceduresMap.size,
-      expandedPatterns: executionGraph.length,
-      scanVectorsExtracted: expectedValues.length,
-      pinDetectionMode: pinMappingMode,
-      mappedScanOutPins: scanOutPins,
-      executionGraph: executionGraph.map(n => `[RESOLVED] ${n.type}: ${n.name}`),
-      mappingLogs
+    timingSetName: (stilText.match(/Timing\s+["']?(\w+)["']?\s+\{/) || [])[1] || "Default_Industrial_Timing",
+
+    debugReport: { 
+      patternBurstsFound: (stilText.match(/PatternBurst\s+/g)||[]).length, 
+      proceduresFound: proceduresMap.size, 
+      expandedPatterns: patterns.length, 
+      scanVectorsExtracted: expectedValues.length, 
+      pinDetectionMode: pinMappingMode, 
+      mappedScanOutPins: scanOutPins, 
+      executionGraph: executionGraph.map(n => `[RESOLVED] ${n.type}: ${n.name}`), 
+      mappingLogs: debugReport.mappingLogs 
     },
     rawStilSnippet: stilText.substring(0, 5000),
-    rawLogSnippet: failLogText ? failLogText.substring(0, 2000) : undefined
-  };
+    rawStilTail: stilText.slice(-5000),
+    rawLogSnippet: failLogText?.substring(0, 2000)
+  } as STILUnified;
+}
+
+function extractNamedBlock(text: string, keyword: string, name?: string): string | null {
+  const regexString = name ? `${keyword}\\s+["']?${name}["']?\\s*\\{` : `${keyword}\\s*\\{`;
+  const match = new RegExp(regexString, 'i').exec(text);
+  return match ? extractBalancedBlock(text, text.indexOf("{", match.index)) : null;
 }
 
 /**
@@ -442,51 +397,87 @@ export function parseSTIL(stilText: string, failLogText?: string): STILUnified {
  * Handles tokens, repeats (\r), and pin data merging deterministically.
  */
 function expandVectorBlock(block: string, scanOutPins: string[], signalGroups: Record<string, string[]>) {
-  // Tokenize by whitespace, preserving newlines/markers
-  const tokens = block.split(/\s+/).filter(t => t.length > 0);
+  // Industrial Tokenizer: Ensure \r, =, and ; are treated as distinct tokens even if attached to bits
+  const tokens = block
+    .replace(/\\r/g, " \\r ")
+    .replace(/=/g, " = ")
+    .replace(/;/g, " ; ")
+    .split(/\s+/)
+    .filter(t => t.length > 0);
 
   let scanOutBits = "";
   let i = 0;
+  let blockRepeat = 1;
 
-  // Industrial Pin-Aware Extraction:
-  // We only care about bits associated with scanOutPins or groups containing them
   while (i < tokens.length) {
     const token = tokens[i];
     
-    if (token.includes("=")) {
-      const parts = token.split("=");
-      const leftSide = parts[0] || (i > 0 ? tokens[i-1] : "");
-      const rightSide = parts[1] || tokens[i+1];
+    // 1. Check for standalone repeat (Repeat of the whole vector block)
+    if (token === '\\r') {
+      blockRepeat = parseInt(tokens[i+1]) || 1;
+      i += 2;
+      continue;
+    }
 
-      // Resolve which pins this assignment target includes
+    // 2. Check for Signal Assignment
+    if (token.includes("=") || (tokens[i+1] === "=")) {
+      let leftSide: string;
+      let valStartIdx: number;
+
+      if (token.includes("=")) {
+        const parts = token.split("=");
+        leftSide = parts[0] || (i > 0 ? tokens[i-1] : "");
+        valStartIdx = parts[1] ? i : i + 1;
+      } else {
+        leftSide = token.replace(/['"]/g, "");
+        valStartIdx = i + 2;
+      }
+
       const targetPins = signalGroups[leftSide] || [leftSide];
       const isScanOutTarget = targetPins.some(p => scanOutPins.includes(p));
+      console.log(`[STIL] Found Assignment: ${leftSide} = ... (isScanOut: ${isScanOutTarget})`);
 
-      if (isScanOutTarget && rightSide) {
-        // Find indices in the target group that correspond to scan-out pins
-        // For simplicity, if the WHOLE group is our target group, we take its bits
-        // In physical ATE, we filter bits by their position in the target group
-        let bits = rightSide.replace(/[\s'":;]/g, "");
+      if (isScanOutTarget) {
+        // Parse the value which might contain repeats: e.g. "01\r 5 X 1"
+        let j = valStartIdx;
+        let assignmentTerminated = false;
         
-        // Handle repeat \r within assignment if present (rare)
-        if (bits.startsWith("\\r")) {
-           // ... (handled below)
-        }
+        while (j < tokens.length && !assignmentTerminated) {
+          let currentValToken = tokens[j];
+          if (j === valStartIdx && tokens[j-1] === "=" && currentValToken.includes("=")) {
+              // already handled
+          }
+          
+          if (!currentValToken || currentValToken === ";") {
+            assignmentTerminated = true;
+            break;
+          }
 
-        // Industrial State Preservation: L=0, H=1, X=X, Z=Z
-        // We preserve X for the simulator to handle don't-cares
-        scanOutBits += bits.replace(/H/g, "1").replace(/L/g, "0").replace(/[;]/g, "");
+          if (currentValToken === "\\r") {
+            const count = parseInt(tokens[j+1]);
+            let bit = tokens[j+2] || "0";
+            bit = bit.replace(/H/g, "1").replace(/L/g, "0").replace(/[;'"]/g, "");
+            
+            const safeCount = Math.min(count, 100000); 
+            scanOutBits += bit.repeat(safeCount);
+            j += 3;
+          } else {
+            if (currentValToken.endsWith(";")) {
+               assignmentTerminated = true;
+            }
+            const cleanBits = currentValToken.replace(/H/g, "1").replace(/L/g, "0").replace(/[;'"]/g, "");
+            scanOutBits += cleanBits;
+            j++;
+          }
+        }
+        i = j;
+        continue;
       }
-      
-      if (!parts[1]) i++; // skip the value token if it was separate
-    } else if (token.startsWith("\\r")) {
-      // Standalone repeat outside an assignment? (Unlikely in valid STIL but stay robust)
-      i += 2; 
     }
     i++;
   }
 
-  // Fallback: If no explicit scan-out assignment found, return the last balanced block that looks like bits
+  // Fallback: If no explicit scan-out assignment found, return the last bits token
   if (!scanOutBits) {
     const bitRegex = /^[01XLH]+$/;
     for (const t of tokens) {
@@ -498,7 +489,7 @@ function expandVectorBlock(block: string, scanOutPins: string[], signalGroups: R
     }
   }
 
-  return { scan: scanOutBits, repeat: 1 };
+  return { scan: scanOutBits, repeat: blockRepeat };
 }
 
 function expandVectors(
@@ -519,72 +510,84 @@ function expandVectors(
   const vectors: string[][] = [];
   
   let pos = 0;
+  const V_REGEX = /^(?:V|Vector)\s*\{/i;
+  const LOOP_REGEX = /^Loop\s+(\d+)/i;
+  const CALL_REGEX = /^Call\s+["']?(\w+)["']?/i;
+
   while (pos < content.length) {
-    // Skip whitespace
-    while (pos < content.length && /\s/.test(content[pos])) pos++;
+    // Fast skip whitespace
+    while (pos < content.length && (content[pos] === ' ' || content[pos] === '\t' || content[pos] === '\n' || content[pos] === '\r')) pos++;
     if (pos >= content.length) break;
 
-    const remaining = content.slice(pos);
+    const char = content[pos];
+    const remaining = content.slice(pos, pos + 100); // Only slice a small window for prefix matching
     
     // 1. Vector Block: Support both V { ... } and Vector { ... }
-    if (remaining.match(/^(?:V|Vector)\s*\{/i)) {
-      const braceStart = content.indexOf("{", pos);
-      const inner = extractBalancedBlock(content, braceStart);
-      const expanded = expandVectorBlock(inner, scanOutPins, signalGroups);
-      
-      for (let i = 0; i < expanded.repeat; i++) {
-        vectors.push([expanded.scan]);
-        cycleInfo.current++;
-      }
-      
-      pos = content.indexOf("}", braceStart) + 1;
-    }
-    // 2. Loop Block: Loop N { ... }
-    else if (remaining.match(/^Loop\s+\d+/i)) {
-      const loopMatch = remaining.match(/^Loop\s+(\d+)/i);
-      const count = parseInt(loopMatch![1], 10);
-      const braceStart = content.indexOf("{", pos);
-      const inner = extractBalancedBlock(content, braceStart);
-      
-      const loopVectors = expandVectors(inner, procedures, scanOutPins, signalGroups, memo, logs, cycleInfo, depth + 1);
-      for (let i = 0; i < count; i++) {
-        vectors.push(...loopVectors);
-      }
-      
-      pos = content.indexOf("}", braceStart) + 1;
-    }
-    // 3. Call Statement: Call Name;
-    else if (remaining.match(/^Call\s+/i)) {
-      const semiPos = content.indexOf(";", pos);
-      if (semiPos !== -1) {
-        const stmt = content.slice(pos, semiPos);
-        const pNameMatch = stmt.match(/Call\s+["']?(\w+)["']?/i);
-        const pName = pNameMatch ? pNameMatch[1] : null;
+    if (char === 'V' || char === 'v') {
+      const vMatch = remaining.match(V_REGEX);
+      if (vMatch) {
+        const braceStart = content.indexOf("{", pos);
+        const inner = extractBalancedBlock(content, braceStart);
+        const expanded = expandVectorBlock(inner, scanOutPins, signalGroups);
         
-        if (pName && procedures.has(pName)) {
-           if (!memo.has(pName)) {
-             const nested = expandVectors(procedures.get(pName)!, procedures, scanOutPins, signalGroups, memo, logs, cycleInfo, depth + 1);
-             memo.set(pName, nested);
-           }
-           vectors.push(...memo.get(pName)!);
+        for (let i = 0; i < expanded.repeat; i++) {
+          vectors.push([expanded.scan]);
+          cycleInfo.current++;
         }
-        pos = semiPos + 1;
-      } else {
-        pos = content.length; 
+        pos = content.indexOf("}", braceStart) + 1;
+        continue;
       }
     }
-    else {
-      const nextSemi = content.indexOf(";", pos);
-      const nextBrace = content.indexOf("{", pos);
-      
-      if (nextSemi !== -1 && (nextBrace === -1 || nextSemi < nextBrace)) {
-        pos = nextSemi + 1;
-      } else if (nextBrace !== -1) {
-        extractBalancedBlock(content, nextBrace);
-        pos = content.indexOf("}", nextBrace) + 1;
-      } else {
-        pos = content.length; 
+
+    // 2. Loop Block: Loop N { ... }
+    if (char === 'L' || char === 'l') {
+      const loopMatch = remaining.match(LOOP_REGEX);
+      if (loopMatch) {
+        const count = parseInt(loopMatch[1], 10);
+        const braceStart = content.indexOf("{", pos);
+        const inner = extractBalancedBlock(content, braceStart);
+        
+        const loopVectors = expandVectors(inner, procedures, scanOutPins, signalGroups, memo, logs, cycleInfo, depth + 1);
+        for (let i = 0; i < count; i++) {
+          vectors.push(...loopVectors);
+        }
+        pos = content.indexOf("}", braceStart) + 1;
+        continue;
       }
+    }
+
+    // 3. Call Statement: Call Name;
+    if (char === 'C' || char === 'c') {
+      const callMatch = remaining.match(CALL_REGEX);
+      if (callMatch) {
+        const semiPos = content.indexOf(";", pos);
+        if (semiPos !== -1) {
+          const pName = callMatch[1];
+          if (pName && procedures.has(pName)) {
+             if (!memo.has(pName)) {
+               const nested = expandVectors(procedures.get(pName)!, procedures, scanOutPins, signalGroups, memo, logs, cycleInfo, depth + 1);
+               memo.set(pName, nested);
+             }
+             const cached = memo.get(pName)!;
+             for(let i=0; i<cached.length; i++) vectors.push(cached[i]);
+          }
+          pos = semiPos + 1;
+          continue;
+        }
+      }
+    }
+
+    // Fallback: Skip to next separator
+    const nextSemi = content.indexOf(";", pos);
+    const nextBrace = content.indexOf("{", pos);
+    
+    if (nextSemi !== -1 && (nextBrace === -1 || nextSemi < nextBrace)) {
+      pos = nextSemi + 1;
+    } else if (nextBrace !== -1) {
+      extractBalancedBlock(content, nextBrace);
+      pos = content.indexOf("}", nextBrace) + 1;
+    } else {
+      pos = content.length; 
     }
   }
 
@@ -626,91 +629,30 @@ export function parseFailLog(logText: string, scanChains: ScanChain[]) {
   return failures;
 }
 
-/**
- * Extracts all named blocks for a given keyword into a Map
- */
-function extractNamedBlockMap(text: string, keyword: string): Map<string, string> {
-  const map = new Map<string, string>();
-  const blockRegex = new RegExp(`${keyword}\\s+["']?(\\w+)["']?\\s*\\{`, 'gi');
-  let match;
-  while ((match = blockRegex.exec(text)) !== null) {
-    const name = match[1];
-    const bStart = text.indexOf("{", match.index);
-    map.set(name, extractBalancedBlock(text, bStart));
-  }
-  return map;
-}
-
-/**
- * Industrial-Grade Procedure Extraction
- */
-function extractProceduresMap(stilText: string): Map<string, string> {
-  const procedures = extractNamedBlockMap(stilText, "Procedures");
-  // Also scan for top-level individual Procedure blocks if not in a Procedures container
-  const procRegex = /Procedure\s+["']?(\w+)["']?\s*\{/gi;
-  let pMatch;
-  while ((pMatch = procRegex.exec(stilText)) !== null) {
-    const name = pMatch[1];
-    const bStart = stilText.indexOf("{", pMatch.index);
-    procedures.set(name, extractBalancedBlock(stilText, bStart));
-  }
-  return procedures;
-}
-
-/**
- * Execution Graph Node
- */
-interface ExecutionNode {
-  type: 'Pattern' | 'Call';
-  name: string;
-  content?: string;
-}
-
-/**
- * Resolves Pattern Execution Graph
- */
 function resolveExecutionGraph(stilText: string, activeBurst: string): ExecutionNode[] {
   const graph: ExecutionNode[] = [];
-  const burstContent = extractNamedBlock(stilText, "PatternBurst", activeBurst) || "";
+  const burstContent = extractBlocks(stilText, "PatternBurst", new Map()).get(activeBurst) || "";
+  const patList = extractBlocks(burstContent, "PatList", new Map()).get("") || "";
 
-  // --- FIX: Parse PatList { "P1" "P2" ... } format (standard STIL) ---
-  const patListBlock = extractNamedBlock(burstContent, "PatList") || "";
-  if (patListBlock) {
-    // Extract all quoted or unquoted pattern names from PatList body
-    const nameRegex = /["']?(\w+)["']?/g;
-    let pnMatch;
-    while ((pnMatch = nameRegex.exec(patListBlock)) !== null) {
-      const patName = pnMatch[1];
-      const patContent = extractNamedBlock(stilText, "Pattern", patName);
-      if (patContent !== null) {
-        graph.push({ type: 'Pattern', name: patName, content: patContent });
-      }
-    }
+  if (patList) {
+    [...patList.matchAll(/["']?(\w+)["']?/g)].forEach(m => {
+      const c = extractBlocks(stilText, "Pattern", new Map()).get(m[1]);
+      if (c) graph.push({ type: 'Pattern', name: m[1], content: c });
+    });
   }
 
-  // Legacy: PatternBurst uses "Pattern <name>;" reference lines (non-PatList form)
-  if (graph.length === 0) {
-    const patRefRegex = /Pattern\s+["']?(\w+)["']?\s*;/g;
-    let prMatch;
-    while ((prMatch = patRefRegex.exec(burstContent)) !== null) {
-      const patName = prMatch[1];
-      const patContent = extractNamedBlock(stilText, "Pattern", patName);
-      graph.push({ type: 'Pattern', name: patName, content: patContent || "" });
-    }
+  if (!graph.length) {
+    [...burstContent.matchAll(/Pattern\s+["']?(\w+)["']?\s*;/g)].forEach(m => {
+      const c = extractBlocks(stilText, "Pattern", new Map()).get(m[1]);
+      graph.push({ type: 'Pattern', name: m[1], content: c || "" });
+    });
   }
 
-  // Final Fallback: No burst found — scan entire file for Pattern blocks
-  if (graph.length === 0) {
-    const patBlockRegex = /Pattern\s+["']?(\w+)["']?\s*\{/g;
-    let pbMatch;
-    while ((pbMatch = patBlockRegex.exec(stilText)) !== null) {
-      const patName = pbMatch[1];
-      const braceS = stilText.indexOf("{", pbMatch.index);
-      const patCont = extractBalancedBlock(stilText, braceS);
-      graph.push({ type: 'Pattern', name: patName, content: patCont });
-    }
+  if (!graph.length) {
+    [...stilText.matchAll(/Pattern\s+["']?(\w+)["']?\s*\{/g)].forEach(m => {
+      graph.push({ type: 'Pattern', name: m[1], content: extractBalancedBlock(stilText, stilText.indexOf("{", m.index)) });
+    });
   }
-
   return graph;
 }
 

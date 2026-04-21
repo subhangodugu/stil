@@ -140,7 +140,11 @@ export const ChipGrid: React.FC<ChipGridProps> = ({ chips, onChipClick, onRefres
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Patterns</span>
-                  <span className="text-xs font-mono text-white">{(chip.total_patterns || chip.resolved_patterns).toLocaleString()}</span>
+                  <span className="text-xs font-mono text-white">{((chip.total_patterns ?? 0) || (chip.resolved_patterns ?? 0)).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Tester Cycles</span>
+                  <span className="text-xs font-mono text-cyan-400">{(chip.tester_cycles || 0).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Vectors</span>

@@ -17,6 +17,7 @@ export interface ChipTestResult {
   batch_name?: string;
   upload_timestamp?: string;
   failedChains: string[];
+  data_source?: string;
 }
 
 export interface TesterSummary {

@@ -14,6 +14,12 @@ export const db = createPool({
   queueLimit: 0,
 });
 
+// Typed Helper to reduce boilerplate in services/controllers
+export const query = async <T>(sql: string, params?: any[]): Promise<T[]> => {
+  const [rows] = await db.query(sql, params);
+  return rows as T[];
+};
+
 /**
  * Industrial Schema Migration Engine: Self-Healing Layer
  * Ensures MySQL schema remains synchronized with backend evolutionary changes.
@@ -28,6 +34,20 @@ async function ensureColumnExists(table: string, column: string, definition: str
     }
   } catch (error) {
     logger.warn(`[DATABASE] Auto-Sync Error: Failed to audit column ${table}.${column}:`, error);
+  }
+}
+
+async function ensureIndexExists(table: string, column: string, indexName?: string) {
+  try {
+    const name = indexName || `${column}_idx`;
+    const [rows] = await db.query(`SHOW INDEX FROM ${table} WHERE Key_name = ?`, [name]);
+    if ((rows as unknown[]).length === 0) {
+      logger.info(`[DATABASE] Auto-Sync: Indexing table "${table}" column "${column}"...`);
+      await db.query(`ALTER TABLE ${table} ADD INDEX ${name} (${column})`);
+      logger.info(`[DATABASE] Auto-Sync: Created index ${name} on ${table}(${column})`);
+    }
+  } catch (error) {
+    logger.warn(`[DATABASE] Auto-Sync Error: Failed to audit index on ${table}.${column}:`, error);
   }
 }
 
@@ -78,12 +98,73 @@ export async function initDB() {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX (batch_id),
         INDEX (chip_id),
+        INDEX (status),
         FOREIGN KEY (batch_id) REFERENCES upload_batches(id) ON DELETE CASCADE
       );
     `);
 
-    // ... (rest of tables)
-    
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS failed_chains (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        chip_id INT,
+        chain_name VARCHAR(255),
+        mismatch_count INT,
+        INDEX (chip_id),
+        INDEX (chain_name),
+        FOREIGN KEY (chip_id) REFERENCES chips(id) ON DELETE CASCADE
+      );
+    `);
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS failure_details (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        chip_id INT,
+        pattern_id VARCHAR(100),
+        chain_name VARCHAR(255),
+        flip_flop_position INT,
+        expected_value CHAR(1),
+        actual_value CHAR(1),
+        mismatch_type VARCHAR(50),
+        fault_type VARCHAR(50),
+        INDEX (chip_id),
+        INDEX (pattern_id),
+        INDEX (chain_name),
+        FOREIGN KEY (chip_id) REFERENCES chips(id) ON DELETE CASCADE
+      );
+    `);
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS ai_insights (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        chip_id INT,
+        failure_hash VARCHAR(64),
+        insight TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX (chip_id),
+        INDEX (failure_hash),
+        FOREIGN KEY (chip_id) REFERENCES chips(id) ON DELETE CASCADE
+      );
+    `);
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS localized_defects (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        chip_id INT,
+        channel VARCHAR(255),
+        ff_id VARCHAR(100),
+        fault_type VARCHAR(50),
+        confidence FLOAT,
+        severity VARCHAR(50),
+        fail_count INT,
+        description TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX (chip_id),
+        INDEX (channel),
+        INDEX (fault_type),
+        FOREIGN KEY (chip_id) REFERENCES chips(id) ON DELETE CASCADE
+      );
+    `);
+
     // 2. Self-Healing Schema Migration Layer: Audit Critical Columns
     logger.info("[DATABASE] Running Auto-Sync audit...");
     
@@ -96,11 +177,17 @@ export async function initDB() {
     await ensureColumnExists("chips", "resolved_patterns", "INT DEFAULT 0 AFTER tester_cycles");
     await ensureColumnExists("chips", "accuracy", "FLOAT DEFAULT NULL AFTER yield_percent");
     await ensureColumnExists("chips", "data_source", "ENUM('ATE_LOG', 'SIMULATED', 'INFERRED') DEFAULT 'SIMULATED' AFTER project_data");
+    await ensureIndexExists("chips", "status");
 
     // Failure Details Table Audit
     await ensureColumnExists("failure_details", "expected_value", "CHAR(1) AFTER flip_flop_position");
     await ensureColumnExists("failure_details", "actual_value", "CHAR(1) AFTER expected_value");
     await ensureColumnExists("failure_details", "fault_type", "VARCHAR(50) AFTER mismatch_type");
+    await ensureIndexExists("failure_details", "pattern_id");
+    await ensureIndexExists("failure_details", "chain_name");
+
+    // Failed Chains Table Audit
+    await ensureIndexExists("failed_chains", "chain_name");
 
     // Analytics Cache Table Audit
     await ensureColumnExists("analytics_cache", "hotspot_summary", "JSON AFTER top_failing_pattern");

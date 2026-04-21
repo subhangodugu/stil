@@ -48,15 +48,17 @@ export const Header: React.FC<{ onStartStreaming?: (parsed: any, logMap?: any) =
       }
 
       const data = await resp.json();
+      
+      // Update store with full scanned architecture and failure heatmap
       setProjectData(data.projectData);
       setFailingFFs(data.failingFFs);
 
       // Trigger Real-Time Streaming Diagnostic if supported
-      if (onStartStreaming) {
+      if (onStartStreaming && data.projectData) {
         onStartStreaming(data.projectData, {});
       }
 
-      // Refresh dashboard data for unified connectivity
+      // Refresh dashboard background data
       const summaryResp = await fetch('/api/data/summary');
       if (summaryResp.ok) {
         const summaryData = await summaryResp.json();
@@ -64,7 +66,13 @@ export const Header: React.FC<{ onStartStreaming?: (parsed: any, logMap?: any) =
       }
 
       toast.success("Pipeline Executed: Deterministic Faults Mapped", { id: toastId });
-      navigate('/');
+      
+      // Navigate to the detail view for immediate transparency on "scanned data"
+      if (data.chipResult?.id) {
+        navigate(`/chip/${data.chipResult.id}`);
+      } else {
+        navigate('/');
+      }
     } catch (err: any) {
       toast.error(`System Failure: ${err.message}`, { id: toastId });
       console.error(err);

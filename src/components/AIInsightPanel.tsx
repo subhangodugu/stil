@@ -6,14 +6,16 @@ import { cn } from '../lib/utils';
 
 export interface ParsedInsight {
   summary?: string;
+  defectType?: 'STUCK_AT' | 'BRIDGE' | 'CHAIN_BREAK' | 'TIMING' | 'UNKNOWN';
   rootCause?: string;
   confidence?: number;
   stilEvidence?: string;
+  faChecklist?: string[];
   recommendedAction?: string[];
 }
 
 export const AIInsightPanel: React.FC = () => {
-  const { projectData, failingFFs, selectedChain } = useStore();
+  const { projectData, failingFFs, selectedChain, aiConfig } = useStore();
   const [insightData, setInsightData] = useState<ParsedInsight | null>(null);
   const [rawInsight, setRawInsight] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -55,7 +57,11 @@ export const AIInsightPanel: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           chipId: diagnosticData.chipId,
-          data: diagnosticData
+          data: diagnosticData,
+          aiConfig: {
+            apiKey: aiConfig.apiKey,
+            model: aiConfig.model
+          }
         }),
       });
 
@@ -124,23 +130,55 @@ export const AIInsightPanel: React.FC = () => {
             >
               {insightData ? (
                  <div className="space-y-4">
-                    <div className="p-4 bg-slate-800/40 rounded-lg border border-slate-700">
-                       <h4 className="text-cyan-400 font-medium mb-1">Root Cause Diagnosis (Conf: {insightData.confidence || 0}%)</h4>
-                       <p className="text-slate-200 text-sm font-semibold">{insightData.rootCause}</p>
-                       <p className="text-slate-400 text-xs mt-2">{insightData.summary}</p>
+                    <div className="p-4 bg-slate-800/40 rounded-lg border border-slate-700 relative overflow-hidden">
+                       {/* Intensity Glow based on confidence */}
+                       <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/5 blur-3xl -mr-16 -mt-16" />
+                       
+                       <div className="flex justify-between items-start mb-3">
+                        <div className="space-y-1">
+                          <h4 className="text-cyan-400 font-medium text-xs uppercase tracking-widest">Forensic Diagnosis</h4>
+                          <h2 className="text-white text-xl font-black tracking-tight">{insightData.defectType?.replace('_', ' ') || 'ANALYSIS PENDING'}</h2>
+                        </div>
+                        <div className="flex flex-col items-end">
+                          <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">Confidence</div>
+                          <div className={cn(
+                            "px-2 py-1 rounded text-xs font-black",
+                            (insightData.confidence || 0) > 80 ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                          )}>
+                            {insightData.confidence || 0}%
+                          </div>
+                        </div>
+                       </div>
+
+                       <div className="p-3 bg-slate-950/40 rounded-lg border border-slate-800/50 mb-3">
+                         <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">Localized Source</div>
+                         <p className="text-slate-200 text-sm font-semibold">{insightData.rootCause}</p>
+                       </div>
+
+                       <p className="text-slate-400 text-xs leading-relaxed italic">"{insightData.summary}"</p>
                     </div>
+
                     {insightData.stilEvidence && (
                        <div className="p-4 bg-slate-950 rounded-lg border border-slate-800 font-mono text-xs overflow-x-auto text-emerald-400 custom-scrollbar">
-                          <div className="text-slate-500 mb-2 uppercase tracking-widest text-[10px] font-sans font-bold">Context Evidence</div>
+                          <div className="text-slate-500 mb-2 uppercase tracking-widest text-[10px] font-sans font-bold flex items-center gap-2">
+                             <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                             Contextual Evidence
+                          </div>
                           <pre className="whitespace-pre-wrap break-all">{insightData.stilEvidence}</pre>
                        </div>
                     )}
-                    {insightData.recommendedAction && insightData.recommendedAction.length > 0 && (
+
+                    {(insightData.faChecklist || insightData.recommendedAction) && (
                        <div className="p-4 bg-slate-800/40 rounded-lg border border-slate-700">
-                          <h4 className="text-cyan-400 text-sm font-medium mb-2">Recommended FA Action</h4>
-                          <ul className="list-disc list-inside text-xs text-slate-300 space-y-1">
-                             {insightData.recommendedAction.map((act, i) => <li key={i}>{act}</li>)}
-                          </ul>
+                          <h4 className="text-cyan-400 text-xs font-bold uppercase tracking-widest mb-3">Failure Analysis Checklist</h4>
+                          <div className="space-y-2">
+                             {(insightData.faChecklist || insightData.recommendedAction || []).map((act, i) => (
+                               <div key={i} className="flex gap-3 text-xs text-slate-300 items-start group">
+                                 <div className="mt-1 w-3 h-3 rounded-sm border border-slate-600 flex-shrink-0 group-hover:border-cyan-500 transition-colors" />
+                                 <span>{act}</span>
+                               </div>
+                             ))}
+                          </div>
                        </div>
                     )}
                  </div>

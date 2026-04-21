@@ -2,101 +2,94 @@ import { Request, Response } from "express";
 import { runDiagnosticPipeline } from "../services/pipelineService.js";
 import { runAdvancedInjection, runAdvancedInjectionFromProjectData } from "../services/advancedInjectionEngine.js";
 import fs from "fs";
-import { logger } from "../utils/logger.js";
+import { asyncHandler } from "../utils/AsyncHandler.js";
+import { broadcast } from "../server.js";
+import { query } from "../config/db.js";
+
+const readFile = (f: any) => f?.path ? fs.promises.readFile(f.path, 'utf-8') : f?.buffer?.toString('utf-8');
+const cleanup = async (files: any[]) => await Promise.all(files.filter(f => f?.path).map(f => fs.promises.unlink(f.path).catch(() => {})));
 
 export const uploadController = {
-  analyze: async (req: Request, res: Response) => {
+  analyze: asyncHandler(async (req, res) => {
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    try {
-      if (!files?.stil || files.stil.length === 0) {
-        return res.status(400).json({ error: "STIL file is required" });
-      }
-
-      const stilFile = files.stil[0];
-      const failLogText = files.failLog?.[0]?.path 
-        ? await fs.promises.readFile(files.failLog[0].path, 'utf-8') 
-        : files.failLog?.[0]?.buffer 
-          ? files.failLog[0].buffer.toString('utf-8')
-          : undefined;
-
-      const output = await runDiagnosticPipeline([stilFile], "Single_Execute_Pipeline", failLogText);
-      const mainResult = output.results[0];
-
-      return res.json({ 
-        projectData: mainResult, 
-        isPersistent: true 
-      });
-    } catch (error) {
-      logger.error("Analysis error:", error);
-      return res.status(500).json({ error: "Failed to analyze files" });
-    } finally {
-      // Emergency Cleanup
-      const allFiles = [...(files?.stil || []), ...(files?.failLog || [])];
-      for (const f of allFiles) {
-        if (f.path && fs.existsSync(f.path)) {
-          await fs.promises.unlink(f.path).catch(() => {});
-        }
+    
+    // --- 🐘 INDUSTRIAL HYDRATION LAYER ---
+    let preParsed = req.body.projectDataJson ? JSON.parse(req.body.projectDataJson) : null;
+    
+    if (req.body.chipId && !preParsed) {
+      const [chip] = await query<any>("SELECT project_data FROM chips WHERE id = ?", [req.body.chipId]);
+      if (chip?.project_data) {
+        preParsed = typeof chip.project_data === 'string' ? JSON.parse(chip.project_data) : chip.project_data;
       }
     }
-  },
+    const failLogText = await readFile(files.failLog?.[0]);
 
-  bulkAnalyze: async (req: Request, res: Response) => {
+    const output = await runDiagnosticPipeline([files?.stil?.[0] || { originalname: "synthetic.stil", buffer: Buffer.from(""), path: null } as any], "Single_Execute_Pipeline", failLogText, preParsed);
+    const mainResult = output.results[0] as any;
+
+    const failingFFs: Record<string, number> = {};
+    mainResult.failureDetails?.forEach((d: any) => failingFFs[`${d.chainName}:FF_${d.flipFlopPosition}`] = (failingFFs[`${d.chainName}:FF_${d.flipFlopPosition}`] || 0) + 1);
+
+    await cleanup([...(files?.stil || []), ...(files?.failLog || [])]);
+    return res.json({ projectData: output.lastParsed, chipResult: mainResult, failingFFs, isPersistent: true });
+  }),
+
+  bulkAnalyze: asyncHandler(async (req, res) => {
     const files = req.files as Express.Multer.File[];
-    try {
-      if (!files || files.length === 0) {
-        return res.status(400).json({ error: "No files uploaded" });
+    
+    const output = await runDiagnosticPipeline(
+      files, 
+      "Bulk_Execute_Pipeline", 
+      undefined, 
+      undefined,
+      (progress) => {
+        broadcast({ type: "INGESTION_PROGRESS", ...progress });
       }
+    );
+    
+    await cleanup(files);
+    
+    const successCount = output.results.length;
+    const failCount = files.filter(f => /\.(stil|stf)$/i.test(f.originalname)).length - successCount;
 
-      const output = await runDiagnosticPipeline(files, "Bulk_Execute_Pipeline");
-      return res.json(output);
-    } catch (error: unknown) {
-      const err = error as { message?: string };
-      logger.error("Bulk analysis error:", error);
-      return res.status(500).json({ 
-        error: "Bulk analysis failed", 
-        message: err.message || "Industrial parallel processing error" 
-      });
-    } finally {
-      // Emergency Cleanup for bulk
-      if (files && Array.isArray(files)) {
-        for (const f of files) {
-          if (f.path && fs.existsSync(f.path)) {
-            await fs.promises.unlink(f.path).catch(() => {});
-          }
-        }
+    return res.json({
+      ...output,
+      manifest: {
+        total: files.length,
+        success: successCount,
+        failed: Math.max(0, failCount)
+      }
+    });
+  }),
+
+  injectFault: asyncHandler(async (req, res) => {
+    const params = typeof req.body.params === 'string' ? JSON.parse(req.body.params) : req.body.params;
+    
+    // --- 🐘 INDUSTRIAL HYDRATION LAYER ---
+    let projectData = req.body.projectDataJson;
+    
+    if (req.body.chipId && !projectData) {
+      const [chip] = await query<any>("SELECT project_data FROM chips WHERE id = ?", [req.body.chipId]);
+      if (chip?.project_data) {
+        projectData = typeof chip.project_data === 'string' ? JSON.parse(chip.project_data) : chip.project_data;
       }
     }
-  },
 
-  injectFault: async (req: Request, res: Response) => {
-    try {
-      const params = JSON.parse(req.body.params as string);
-
-      // --- Mode A: Pre-parsed projectData JSON (from drill-down view, no STIL re-upload needed) ---
-      if (req.body.projectDataJson) {
-        const stilMetadata = JSON.parse(req.body.projectDataJson as string);
-        const result = runAdvancedInjectionFromProjectData(stilMetadata, params);
-        return res.json(result);
+    if (typeof projectData === 'string') {
+      try {
+        projectData = JSON.parse(projectData);
+      } catch (e) {
+        console.warn("Soft Recovery: Malformed projectDataJson, falling back to raw STIL.");
+        projectData = null;
       }
-
-      // --- Mode B: Raw STIL file uploaded (from normal upload flow) ---
-      if (!req.file) {
-        return res.status(400).json({ error: "Either a STIL file or projectDataJson body field is required" });
-      }
-
-      const stilText = req.file.path
-        ? await fs.promises.readFile(req.file.path, 'utf-8')
-        : req.file.buffer.toString('utf-8');
-
-      if (req.file.path) {
-        await fs.promises.unlink(req.file.path).catch(() => {});
-      }
-
-      const result = runAdvancedInjection(stilText, params);
-      return res.json(result);
-    } catch (error) {
-      logger.error("Injection error:", error);
-      return res.status(500).json({ error: "Failed to inject fault" });
     }
-  }
+
+    if (projectData) {
+      return res.json(runAdvancedInjectionFromProjectData(projectData, params));
+    }
+    
+    const stilText = await readFile(req.file);
+    if (req.file?.path) await fs.promises.unlink(req.file.path).catch(() => {});
+    return res.json(runAdvancedInjection(stilText, params));
+  })
 };

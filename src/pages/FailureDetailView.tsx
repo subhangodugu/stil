@@ -2,13 +2,16 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
+import {
   ArrowLeft, Activity, AlertTriangle,
   BarChart3, LayoutGrid, Terminal, Cpu, Database,
-  Zap, LayoutDashboard, Brain, RefreshCw, CheckCircle, ShieldAlert
+  Zap, LayoutDashboard, Brain, RefreshCw, CheckCircle, ShieldAlert,
+  Settings, Download
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
+import { AIConfigModal } from '../components/AIConfigModal';
+import { STILCodeViewer } from '../components/failure_detail/STILCodeViewer';
 
 // Sub-components
 import FailureSummaryCards from '../components/failure_detail/FailureSummaryCards';
@@ -18,6 +21,10 @@ import BitCompareViewer from '../components/failure_detail/BitCompareViewer';
 import PatternTimeline from '../components/failure_detail/PatternTimeline';
 import InDepthTopologySection from '../components/failure_detail/InDepthTopologySection';
 import ArchitectureDataGrid from '../components/failure_detail/ArchitectureDataGrid';
+import DiagnosticAuditPanel from '../components/failure_detail/DiagnosticAuditPanel';
+import MacroRegistryPanel from '../components/failure_detail/MacroRegistryPanel';
+import { WaveformPanel } from '../components/failure_detail/WaveformPanel';
+import { WaveformViewer } from '../components/failure_detail/WaveformViewer';
 
 // Intelligence Tab Components (Re-used from Main Analysis)
 import { HardwareTopology } from '../components/HardwareTopology';
@@ -29,11 +36,11 @@ type ForensicTab = 'SUMMARY' | 'INTELLIGENCE' | 'IN_DEPTH';
 export default function FailureDetailView() {
   const { chipId } = useParams();
   const navigate = useNavigate();
-  const { setError, setStilText } = useStore();
-  
+  const { setError, setStilText, projectData, aiConfig } = useStore();
+
   const [activeTab, setActiveTab] = useState<ForensicTab>('SUMMARY');
   const [intelMode, setIntelMode] = useState<'topology' | 'injection'>('topology');
-  
+
   const [data, setData] = useState<{
     chip: any;
     failedChains: any[];
@@ -42,6 +49,7 @@ export default function FailureDetailView() {
   const [loading, setLoading] = useState(true);
   const [aiInsight, setAiInsight] = useState<any | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -50,15 +58,15 @@ export default function FailureDetailView() {
         if (!response.ok) throw new Error('Failed to fetch failure details');
         const result = await response.json();
         setData(result);
-        
+
         // RE-HYDRATION: Reconstruct architecture metadata for In-Depth Analysis
         // Also clear stilText so FaultInjectionPanel uses projectDataJson Mode A
         if (result.chip.project_data) {
           try {
-            const archData = typeof result.chip.project_data === 'string' 
-              ? JSON.parse(result.chip.project_data) 
+            const archData = typeof result.chip.project_data === 'string'
+              ? JSON.parse(result.chip.project_data)
               : result.chip.project_data;
-            
+
             // Inject dataSource from DB directly into store
             useStore.getState().setProjectData({
               ...archData,
@@ -69,7 +77,7 @@ export default function FailureDetailView() {
             console.error("Hydration failed:", e);
           }
           // Trigger AI insight after hydration
-          fetchAIInsight(result.chip, result.failedChains, result.failureDetails, 
+          fetchAIInsight(result.chip, result.failedChains, result.failureDetails,
             (() => { try { return typeof result.chip.project_data === 'string' ? JSON.parse(result.chip.project_data) : result.chip.project_data; } catch { return null; } })()
           );
         }
@@ -89,7 +97,7 @@ export default function FailureDetailView() {
       const failingFFs = failureDetails
         .slice(0, 20) // Cap to avoid huge prompts
         .map((d: any) => `${d.chain_name}:FF_${d.flip_flop_position}`);
-      
+
       const resp = await fetch('/api/ai/insight', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -105,6 +113,10 @@ export default function FailureDetailView() {
             selectedChain: failedChains[0]?.chain_name ?? 'Unknown',
             failingFFs,
             rawStilSnippet: projectData?.rawStilSnippet ?? ''
+          },
+          aiConfig: {
+            apiKey: aiConfig.apiKey,
+            model: aiConfig.model
           }
         })
       });
@@ -119,12 +131,66 @@ export default function FailureDetailView() {
     }
   };
 
+  const downloadForensicReport = () => {
+    if (!data) return;
+    
+    // Structure the report with maximum industrial density and metadata
+    const reportData = {
+      report_type: "STIL_SILICON_FORENSIC_ANALYSIS",
+      version: "2.0.2",
+      generated_at: new Date().toISOString(),
+      session_id: crypto.randomUUID?.() || Math.random().toString(36).substring(7),
+      chip_metadata: {
+        chip_id: data.chip.chip_id,
+        batch: data.chip.batch_name ?? `Batch #${data.chip.batch_id}`,
+        status: data.chip.status,
+        yield_percent: data.chip.yield_percent,
+        mismatches: data.chip.mismatches,
+        data_source: data.chip.data_source,
+        recorded_at: data.chip.created_at
+      },
+      ai_intelligence: aiInsight ? {
+        summary: aiInsight.summary,
+        root_cause: aiInsight.rootCause,
+        confidence: aiInsight.confidence,
+        recommended_actions: aiInsight.recommendedAction
+      } : "Analysis Pending",
+      failing_chains_summary: data.failedChains.map((ch: any) => ({
+        name: ch.chain_name,
+        mismatch_count: ch.mismatch_count
+      })),
+      bit_level_failures: data.failureDetails.map((f: any) => ({
+        chain: f.chain_name,
+        ff_index: f.flip_flop_position,
+        pattern: f.pattern_index,
+        vector: f.vector_index,
+        expected: f.expected_bit,
+        actual: f.actual_bit
+      })),
+      architecture_context: {
+        total_scan_chains: data.chip.total_scan_chains,
+        total_patterns: data.chip.total_patterns,
+        tester_cycles: data.chip.tester_cycles
+      }
+    };
+
+    const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Forensic_Report_${data.chip.chip_id}_${new Date().getTime()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   if (loading) {
     return (
       <div className="h-[60vh] flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <motion.div 
-            animate={{ rotate: 360 }} 
+          <motion.div
+            animate={{ rotate: 360 }}
             transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
           >
             <Activity className="text-cyan-500" size={48} />
@@ -138,21 +204,22 @@ export default function FailureDetailView() {
   if (!data) return null;
 
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       className="space-y-8 pb-20"
     >
+      <AIConfigModal isOpen={isConfigOpen} onClose={() => setIsConfigOpen(false)} />
       {/* Header Info */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div className="flex items-center gap-6">
-          <button 
+          <button
             onClick={() => navigate('/')}
             className="w-12 h-12 rounded-xl flex items-center justify-center bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:border-slate-700 transition-all group"
           >
             <ArrowLeft size={24} className="group-hover:-translate-x-1 transition-transform" />
           </button>
-          
+
           <div>
             <div className="flex items-center gap-3 min-w-0">
               <h2 className="text-3xl font-black text-white tracking-tight truncate max-w-[400px] xl:max-w-[700px]" title={data.chip.chip_id}>
@@ -160,8 +227,8 @@ export default function FailureDetailView() {
               </h2>
               <span className={cn(
                 "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border",
-                data.chip.status === 'FAIL' 
-                  ? "bg-red-500/10 border-red-500/20 text-red-500" 
+                data.chip.status === 'FAIL'
+                  ? "bg-red-500/10 border-red-500/20 text-red-500"
                   : "bg-emerald-500/10 border-emerald-500/20 text-emerald-500"
               )}>
                 Status: {data.chip.status}
@@ -170,8 +237,8 @@ export default function FailureDetailView() {
                 <span className={cn(
                   "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border flex items-center gap-1.5",
                   data.chip.data_source === 'ATE_LOG' ? "bg-cyan-500/10 border-cyan-500/20 text-cyan-400" :
-                  data.chip.data_source === 'INFERRED' ? "bg-amber-500/10 border-amber-500/20 text-amber-500" :
-                  "bg-slate-500/10 border-slate-500/20 text-slate-500"
+                    data.chip.data_source === 'INFERRED' ? "bg-amber-500/10 border-amber-500/20 text-amber-500" :
+                      "bg-slate-500/10 border-slate-500/20 text-slate-500"
                 )}>
                   <Database size={10} /> {data.chip.data_source.replace('_', ' ')}
                 </span>
@@ -179,7 +246,7 @@ export default function FailureDetailView() {
             </div>
             <p className="text-slate-500 text-[10px] sm:text-xs mt-1 font-black flex items-center gap-2 uppercase tracking-widest">
               <span className="text-slate-700">BATCH:</span> {data.chip.batch_name ?? `Batch #${data.chip.batch_id}`}
-              <span className="w-1.5 h-1.5 bg-slate-800 rounded-full" /> 
+              <span className="w-1.5 h-1.5 bg-slate-800 rounded-full" />
               <span className="flex items-center gap-1.5 text-cyan-500/80">
                 <Terminal size={12} /> RECORDED: {data.chip.created_at ? new Date(data.chip.created_at).toLocaleString() : '—'}
               </span>
@@ -197,6 +264,13 @@ export default function FailureDetailView() {
             <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Fail Bits</p>
             <p className="text-xl font-black text-red-500">{data.chip.mismatches}</p>
           </div>
+          <div className="w-px h-10 bg-slate-800 ml-4 mr-2" />
+          <button
+            onClick={downloadForensicReport}
+            className="flex items-center gap-2 px-4 py-2 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 rounded-xl text-[10px] font-black text-cyan-400 transition-all uppercase tracking-widest"
+          >
+            <Download size={14} /> Report
+          </button>
         </div>
       </div>
 
@@ -208,8 +282,8 @@ export default function FailureDetailView() {
             onClick={() => setActiveTab(tab)}
             className={cn(
               "px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all",
-              activeTab === tab 
-                ? "bg-cyan-500 text-white shadow-lg shadow-cyan-500/20" 
+              activeTab === tab
+                ? "bg-cyan-500 text-white shadow-lg shadow-cyan-500/20"
                 : "text-slate-500 hover:text-slate-300 hover:bg-slate-800/50"
             )}
           >
@@ -220,7 +294,7 @@ export default function FailureDetailView() {
 
       <AnimatePresence mode="wait">
         {activeTab === 'SUMMARY' && (
-          <motion.div 
+          <motion.div
             key="summary"
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -265,19 +339,28 @@ export default function FailureDetailView() {
                           </span>
                         )}
                       </h3>
-                      <p className="text-[10px] text-slate-500 font-bold uppercase mt-0.5 tracking-widest">Groq LLM · llama-3.3-70b-versatile</p>
+                      <span className="text-[10px] text-slate-500 font-bold uppercase mt-0.5 tracking-widest">Groq LLM · {aiConfig.model}</span>
                     </div>
                   </div>
-                  <button
-                    onClick={() => fetchAIInsight(data.chip, data.failedChains, data.failureDetails,
-                      (() => { try { return typeof data.chip.project_data === 'string' ? JSON.parse(data.chip.project_data) : data.chip.project_data; } catch { return null; } })()
-                    )}
-                    disabled={aiLoading}
-                    className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-indigo-400 hover:bg-indigo-500/10 border border-indigo-500/20 rounded-lg transition-all disabled:opacity-40"
-                  >
-                    <RefreshCw size={12} className={cn(aiLoading && "animate-spin")} />
-                    {aiLoading ? 'Analyzing...' : 'Re-analyze'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setIsConfigOpen(true)}
+                      className="p-1.5 text-slate-500 hover:text-cyan-400 hover:bg-slate-800 rounded-lg transition-all"
+                      title="AI Configuration"
+                    >
+                      <Settings size={14} />
+                    </button>
+                    <button
+                      onClick={() => fetchAIInsight(data.chip, data.failedChains, data.failureDetails,
+                        (() => { try { return typeof data.chip.project_data === 'string' ? JSON.parse(data.chip.project_data) : data.chip.project_data; } catch { return null; } })()
+                      )}
+                      disabled={aiLoading}
+                      className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-indigo-400 hover:bg-indigo-500/10 border border-indigo-500/20 rounded-lg transition-all disabled:opacity-40"
+                    >
+                      <RefreshCw size={12} className={cn(aiLoading && "animate-spin")} />
+                      {aiLoading ? 'Analyzing...' : 'Re-analyze'}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="p-6">
@@ -356,11 +439,43 @@ export default function FailureDetailView() {
                 </div>
               </motion.div>
             )}
+
+
+            {/* Industrial STIL Audit & Tail Analysis */}
+            {/* Industrial STIL Audit & Macro Specification */}
+            <div className="grid grid-cols-12 gap-8 items-start">
+              <div className="col-span-12 xl:col-span-3">
+                <ArchitectureDataGrid />
+              </div>
+              <div className="col-span-12 xl:col-span-9">
+                <MacroRegistryPanel />
+              </div>
+            </div>
+
+            {/* Forensic Architecture Intelligence & Audit Section */}
+            <div className="mt-8">
+              <DiagnosticAuditPanel />
+            </div>
+
+            {projectData?.rawStilTail && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-8"
+              >
+                <STILCodeViewer
+                  content={projectData.rawStilTail}
+                  title="STIL Industrial Record (Tail View)"
+                  subtitle="Forensic Content Trace · End of File"
+                />
+              </motion.div>
+            )}
+
           </motion.div>
         )}
 
         {activeTab === 'INTELLIGENCE' && (
-          <motion.div 
+          <motion.div
             key="intelligence"
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -375,30 +490,33 @@ export default function FailureDetailView() {
 
               {/* Main Analysis Engine */}
               <div className="col-span-9 space-y-6">
+                <HardwareTopology />
+                
                 <div className="flex bg-slate-900/40 backdrop-blur-md border border-slate-800 p-1.5 rounded-xl w-fit">
-                  <button 
-                    onClick={() => setIntelMode('topology')}
-                    className={cn(
-                      "px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
-                      intelMode === 'topology' ? "bg-slate-800 text-cyan-400 border border-cyan-500/30 shadow-lg" : "text-slate-500 hover:text-slate-300"
-                    )}
-                  >
-                    <LayoutGrid size={14} className="inline mr-2" /> Architecture Topology
-                  </button>
-                  <button 
-                    onClick={() => setIntelMode('injection')}
-                    className={cn(
-                      "px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
-                      intelMode === 'injection' ? "bg-slate-800 text-amber-500 border border-amber-500/30 shadow-lg" : "text-slate-500 hover:text-slate-300"
-                    )}
-                  >
-                    <Zap size={14} className="inline mr-2" /> Fault Injection
-                  </button>
+                  <div className="px-4 py-2 bg-slate-800 text-amber-500 border border-amber-500/30 shadow-lg rounded-lg text-[9px] font-black uppercase tracking-widest">
+                    <Zap size={14} className="inline mr-2" /> Fault Injection Engine
+                  </div>
                 </div>
 
                 <div className="min-h-[600px]">
-                  {intelMode === 'topology' && <HardwareTopology />}
-                  {intelMode === 'injection' && <FaultInjectionPanel />}
+                  <FaultInjectionPanel
+                    onResult={(chip, failedChains, failureDetails) => {
+                      // NORMALIZE: Map camelCase simulation properties to DB snake_case for UI components
+                      const normalizedChip = {
+                        ...chip,
+                        yield_percent: chip.yieldPercent,
+                        first_fail_pattern: chip.firstFailPattern,
+                        mismatches: chip.mismatches
+                      };
+
+                      setData(prev => prev ? {
+                        ...prev,
+                        chip: { ...prev.chip, ...normalizedChip },
+                        failedChains,
+                        failureDetails
+                      } : prev);
+                    }}
+                  />
                 </div>
 
                 <DiagnosticConsole />
@@ -408,14 +526,26 @@ export default function FailureDetailView() {
         )}
 
         {activeTab === 'IN_DEPTH' && (
-          <motion.div 
+          <motion.div
             key="indepth"
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 20 }}
             className="space-y-8"
           >
-            <InDepthTopologySection />
+            <div className="grid grid-cols-12 gap-8">
+              <div className="col-span-12 xl:col-span-7">
+                <InDepthTopologySection />
+              </div>
+              <div className="col-span-12 xl:col-span-5">
+                <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800 p-6 rounded-2xl h-full flex flex-col items-center justify-center text-center text-slate-500">
+                  <Activity size={40} className="mb-4 opacity-20" />
+                  <p className="text-sm font-bold uppercase tracking-widest">Select a Bit in the Topology to load Logic Waveform</p>
+                </div>
+              </div>
+            </div>
+
+            <WaveformPanel />
           </motion.div>
         )}
       </AnimatePresence>

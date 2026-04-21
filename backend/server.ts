@@ -12,6 +12,8 @@ import analyticsRoutes from "./routes/analyticsRoutes.js";
 import chipRoutes from "./routes/chipRoutes.js";
 import aiRoutes from "./routes/aiRoutes.js";
 import { logger } from "./utils/logger.js";
+import { IndustrialError } from "./utils/IndustrialError.js";
+import compression from "compression";
 
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
@@ -22,8 +24,12 @@ async function startServer() {
   const httpServer = createServer(app);
   const PORT = Number(process.env.PORT ?? 3000);
 
+  // 0. Accelerate Network Response
+  app.use(compression());
+
   // 1. Initialize WebSocket Server for Real-Time Telemetry
   const wss = new WebSocketServer({ server: httpServer });
+  (global as any).wss = wss; // Expose globally for controllers to broadcast ingestion progress
 
   wss.on("connection", (ws) => {
     logger.info("🔌 Live Diagnostic Client Connected");
@@ -36,9 +42,9 @@ async function startServer() {
           const { parsedSTIL, logMap } = payload;
           logger.info(`🚀 Starting Streaming Diagnostic for ${parsedSTIL.patternBurst}`);
 
-          // Industrial Throtte: avoid saturated buffers
+          // Industrial Throtte: Optimized for Network Efficiency (v5)
           let cycleBatch = [];
-          const THROTTLE_SHUTTLE = 1000; 
+          const THROTTLE_SHUTTLE = 5000; 
 
           for await (const result of streamDeterministicSimulation(parsedSTIL.patterns, logMap)) {
             cycleBatch.push(result);
@@ -70,8 +76,8 @@ async function startServer() {
   // (rest of the express setup remains same, just replacing app.listen with httpServer.listen)
   await initDB();
 
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   const uploadDir = path.join(process.cwd(), 'uploads');
   if (!fs.existsSync(uploadDir)) {
@@ -97,11 +103,19 @@ async function startServer() {
   }
 
   app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
-    const errorBody = err as { status?: number; message?: string };
-    logger.error("[CRITICAL SERVER ERROR]", err);
-    res.status(errorBody.status || 500).json({ 
-      error: "Industrial System Error", 
-      message: process.env.NODE_ENV === 'production' ? "Internal server error" : errorBody.message 
+    if (err instanceof IndustrialError) {
+      logger.warn(`[INDUSTRIAL ERROR] ${err.code}: ${err.message}`);
+      return res.status(err.status).json({ 
+        error: err.code, 
+        message: err.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    logger.error("[CRITICAL SYSTEM ERROR]", err);
+    return res.status(500).json({ 
+      error: "INDUSTRIAL_CRITICAL_FAILURE", 
+      message: process.env.NODE_ENV === 'production' ? "Internal server error" : (err as Error).message 
     });
   });
 
@@ -117,5 +131,16 @@ TELEMETRY: WEBSOCKET STREAMING READY
     `);
   });
 }
+
+
+export const broadcast = (data: any) => {
+  const wss = (global as any).wss as WebSocketServer;
+  if (!wss) return;
+  wss.clients.forEach(client => {
+    if (client.readyState === 1) {
+      client.send(JSON.stringify(data));
+    }
+  });
+};
 
 startServer();
